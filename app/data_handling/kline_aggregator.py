@@ -1,13 +1,20 @@
-# kline_aggregator.py
-import pandas as pd
-from kline_utils import get_pandas_resample_interval # 从本地模块导入
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
-def aggregate_klines_df(df_source, agg_interval_str):
+import pandas as pd
+from app.utils.kline_utils import get_pandas_resample_interval # 更新了导入路径
+
+def aggregate_klines_df(df_source: pd.DataFrame, agg_interval_str: str) -> pd.DataFrame:
     """将K线DataFrame聚合到指定的时间间隔。"""
     if df_source.empty:
         return pd.DataFrame()
 
-    df_resample_source = df_source.set_index('timestamp').copy()
+    # 确保timestamp是重采样的索引
+    if 'timestamp' in df_source.columns:
+        df_resample_source = df_source.set_index('timestamp').copy()
+    else: # 如果timestamp已经是索引
+        df_resample_source = df_source.copy()
+
     agg_rules = {
         'open': 'first',
         'high': 'max',

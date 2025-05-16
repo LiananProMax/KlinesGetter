@@ -1,4 +1,6 @@
-# config.py
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 import logging
 
 # --- API配置 ---
@@ -31,3 +33,7 @@ else:
 
 # --- 日志配置 ---
 LOG_LEVEL = logging.INFO # 使用logging.DEBUG获取详细输出，使用logging.INFO获取常规流程
+
+# --- (未来可能添加) 数据存储配置 ---
+# DATA_STORE_TYPE = "memory" # 或 "database"
+# DB_CONNECTION_STRING = "此处填写数据库连接字符串"

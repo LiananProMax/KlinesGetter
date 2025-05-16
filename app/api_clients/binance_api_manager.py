@@ -1,4 +1,6 @@
-# binance_api_manager.py
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 import requests
 import time
 import json
@@ -6,7 +8,7 @@ import logging
 import pandas as pd
 from datetime import datetime, timezone
 from binance.websocket.um_futures.websocket_client import UMFuturesWebsocketClient
-from kline_utils import format_kline_from_api # 从本地模块导入
+from app.utils.kline_utils import format_kline_from_api # 从本地模块导入
 
 def fetch_historical_klines(symbol, interval, num_klines_to_fetch, api_base_url, max_limit_per_request):
     """从币安期货REST API获取历史K线。"""
@@ -17,7 +19,7 @@ def fetch_historical_klines(symbol, interval, num_klines_to_fetch, api_base_url,
     logging.info(f"开始获取{symbol}：{num_klines_to_fetch}个'{interval}'K线。"
                  f"初始结束时间：{initial_requested_end_time_iso}")
 
-    formatted_klines = []
+    # formatted_klines = [] # 此变量在原始版本中在循环前初始化但未使用
     while klines_fetched_so_far < num_klines_to_fetch:
         remaining_klines = num_klines_to_fetch - klines_fetched_so_far
         current_batch_limit = min(remaining_klines, max_limit_per_request)
@@ -83,13 +85,12 @@ class BinanceWebsocketManager:
     def stop(self):
         if self.ws_client:
             logging.info("正在停止WebSocket客户端...")
-            # stop方法应该处理关闭流和线程
             if hasattr(self.ws_client, 'stop') and callable(getattr(self.ws_client, 'stop')):
-                self.ws_client.stop()
+                self.ws_client.stop() # 这应该正确关闭websocket连接
                 logging.info("已发出WebSocket客户端停止命令。")
             else:
                 logging.warning("WebSocket客户端没有可调用的'stop'方法。")
-            self.ws_client = None # 清除客户端实例
+            self.ws_client = None 
         else:
             logging.info("WebSocket客户端未运行或已停止。")
 
@@ -103,13 +104,10 @@ class BinanceWebsocketManager:
                hasattr(self.ws_client.ws_connection, 'keep_running'):
                 return self.ws_client.ws_connection.keep_running
             else:
-                # 如果ws_connection或keep_running不可用，我们可能尚未完全连接，
-                # 或者库结构与预期不同。
-                logging.debug("无法通过ws_connection.keep_running确定WebSocket活动状态。")
-                # 备选方案：一个尚未成功连接的新创建客户端
-                # 可能尚未完全设置ws_connection。
-                # 如果UMFuturesWebsocketClient有可用且可靠的更直接的状态，那将是理想的。
-                return True # 乐观：如果客户端存在且没有其他信息，假设它正在尝试连接
+                logging.debug("无法通过ws_connection.keep_running确定WebSocket活动状态。可能正在连接中。")
+                # 如果ws_client存在但状态无法确定，假设它正在尝试连接或已连接。
+                # 这种状态很棘手；新创建的客户端可能尚未完全初始化ws_connection。
+                return True # 乐观：如果客户端存在且没有明确的"已停止"状态，假设活动/尝试中。
         except Exception as e:
             logging.error(f"检查WebSocket活动状态时出错：{e}")
-            return False # 如果在检查期间发生错误，则假设未激活
+            return False

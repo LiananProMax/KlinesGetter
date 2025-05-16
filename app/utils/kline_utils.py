@@ -1,4 +1,6 @@
-# kline_utils.py
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 import pandas as pd
 
 def format_kline_from_api(kline_data):
