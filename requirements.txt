@@ -1,3 +1,5 @@
 requests
-websocket-client
+pandas
+binance-futures-connector
 python-dotenv
+websocket-client
