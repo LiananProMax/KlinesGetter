@@ -5,3 +5,6 @@ python-dotenv
 websocket-client
 psycopg2-binary
 certifi
+pydantic[email]
+pydantic-settings
+structlog

@@ -2,123 +2,78 @@
 # -*- coding: utf-8 -*-
 
 import logging
-import os
-from dotenv import load_dotenv
+from typing import Any
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# 从项目根目录中的.env文件加载环境变量
-# 假设.env文件与run.py在同一目录或app/core的上两级目录
-dotenv_path = os.path.join(os.path.dirname(__file__), '..', '..', '.env')
-if not os.path.exists(dotenv_path):
-    # 当脚本从项目根目录直接运行时的回退方案
-    dotenv_path = os.path.join(os.getcwd(), '.env')
+class Config(BaseSettings):
+    # --- API配置 ---
+    API_BASE_URL_FUTURES: str = "https://fapi.binance.com"  # 用于USDⓈ-M期货
 
-load_dotenv(dotenv_path=dotenv_path)
+    # --- 交易对设置 ---
+    SYMBOL: str = "BTCUSDT"
 
-# --- 获取环境变量的辅助函数（带默认值和类型转换） ---
-def get_env_variable(var_name, default_value, var_type=str):
-    """
-    获取环境变量并将其转换为指定类型。
-    如果变量不存在或转换失败，则提供默认值。
-    """
-    value = os.getenv(var_name)
-    if value is None:
-        logging.debug(f"环境变量 {var_name} 未找到。使用默认值：{default_value}", exc_info=True)
-        return default_value
-  
-    if var_type == bool:
-        value = value.lower()
-        if value in {'true', '1', 't', 'yes', 'y'}:
-            return True
-        elif value in {'false', '0', 'f', 'no', 'n'}:
-            return False
-        else:
-            raise ValueError(f"环境变量 {var_name} 必须为布尔可解析值（{value} 无效）")
-  
-    try:
-        return var_type(value)
-    except ValueError:
-        # 如果日志尚未配置，使用基本的print
-        print(
-            f"警告：环境变量 {var_name} 类型无效。"
-            f"期望 {var_type}，得到 '{value}'。使用默认值：{default_value}"
-        )
-        return default_value
+    # --- 运行模式 ---
+    OPERATING_MODE: str = "TEST"  # "TEST" 或 "PRODUCTION"
 
-# --- API配置 ---
-API_BASE_URL_FUTURES = get_env_variable("API_BASE_URL_FUTURES", "https://fapi.binance.com")  # 用于USDⓈ-M期货
+    # --- K线设置 ---
+    HISTORICAL_AGG_CANDLES_TO_DISPLAY: int = 50  # 显示的初始聚合K线数量
+    MAX_KLINE_LIMIT_PER_REQUEST: int = 1000  # 每次请求K线的币安API限制
 
-# --- 交易对设置 ---
-SYMBOL = get_env_variable("SYMBOL", "BTCUSDT")
+    # --- 动态间隔设置（由OPERATING_MODE决定） ---
+    # 注意：Pydantic 无法直接处理逻辑，这里我们保留在 main_app.py 中计算
+    BASE_INTERVAL: str = ""  # 基础间隔，由 OPERATING_MODE 决定
+    AGG_INTERVAL: str = ""   # 聚合间隔，由 OPERATING_MODE 决定
 
-# --- 运行模式 ---
-# "TEST": 基础"1m" -> 聚合"3m"
-# "PRODUCTION": 基础"1h" -> 聚合"3h"
-OPERATING_MODE = get_env_variable("OPERATING_MODE", "TEST").upper()
+    # --- 日志配置 ---
+    LOG_LEVEL: str = "INFO"  # 可能的值: "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
 
-# --- K线设置 ---
-HISTORICAL_AGG_CANDLES_TO_DISPLAY = get_env_variable("HISTORICAL_AGG_CANDLES_TO_DISPLAY", 50, int)  # 显示的初始聚合K线数量
-MAX_KLINE_LIMIT_PER_REQUEST = get_env_variable("MAX_KLINE_LIMIT_PER_REQUEST", 1000, int)  # 每次请求K线的币安API限制
+    # --- 数据存储配置 ---
+    DATA_STORE_TYPE: str = "memory"  # "memory" 或 "database"
 
-# --- 动态间隔设置（由OPERATING_MODE决定） ---
-BASE_INTERVAL = ""
-AGG_INTERVAL = ""
+    # --- PostgreSQL数据库配置 (仅当 DATA_STORE_TYPE="database" 时相关) ---
+    DB_HOST: str = "localhost"
+    DB_PORT: str = "5432"
+    DB_NAME: str = "binance_data"
+    DB_USER: str = "postgres"
+    DB_PASSWORD: str = ""
 
-if OPERATING_MODE == "TEST":
-    BASE_INTERVAL = "1m"
-    AGG_INTERVAL = "3m"
-elif OPERATING_MODE == "PRODUCTION":
-    BASE_INTERVAL = "1h"
-    AGG_INTERVAL = "3h"
-else:
-    # 如果日志尚未配置，使用基本的print
-    print(f"错误：.env文件中的OPERATING_MODE '{OPERATING_MODE}'无效。默认使用'TEST'模式。")
-    OPERATING_MODE = "TEST" # 无效时回退到TEST
-    BASE_INTERVAL = "1m"
-    AGG_INTERVAL = "3m"
-    # 如果有效模式对应用程序启动至关重要，可以考虑引发ValueError
-    # raise ValueError(".env中的OPERATING_MODE无效。选择'TEST'或'PRODUCTION'。")
+    # Pydantic 配置：从 .env 文件加载，并验证
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
+    # 自定义验证：确保 OPERATING_MODE 是有效的
+    @property
+    def is_valid_operating_mode(self) -> bool:
+        return self.OPERATING_MODE.upper() in ["TEST", "PRODUCTION"]
 
-# --- 日志配置 ---
-# 从.env获取日志级别字符串并映射到相应的logging常量
-LOG_LEVEL_STR = get_env_variable("LOG_LEVEL", "INFO").upper()
-LOG_LEVEL_MAP = {
-    "DEBUG": logging.DEBUG,
-    "INFO": logging.INFO,
-    "WARNING": logging.WARNING,
-    "ERROR": logging.ERROR,
-    "CRITICAL": logging.CRITICAL,
-}
-LOG_LEVEL = LOG_LEVEL_MAP.get(LOG_LEVEL_STR, logging.INFO) # 如果字符串无效，默认为INFO
+    # 自定义验证：确保 LOG_LEVEL 是有效的
+    @property
+    def validated_log_level(self) -> str:
+        valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        level = self.LOG_LEVEL.upper()
+        if level not in valid_levels:
+            raise ValueError(f"无效的 LOG_LEVEL '{level}'。必须是 {valid_levels} 中的一个。")
+        return level
 
-if LOG_LEVEL_STR not in LOG_LEVEL_MAP:
-    # 如果日志尚未配置，使用基本的print
-    print(
-        f"警告：.env文件中的LOG_LEVEL '{LOG_LEVEL_STR}'无效。默认使用INFO。"
-    )
+# 全局配置实例
+config = Config()
 
-# --- 数据存储配置 ---
-DATA_STORE_TYPE = get_env_variable("DATA_STORE_TYPE", "memory").lower() # "memory" 或 "database"
+# 在应用启动时，验证配置
+try:
+    # 验证 OPERATING_MODE
+    if not config.is_valid_operating_mode:
+        raise ValueError(f"OPERATING_MODE '{config.OPERATING_MODE}' 无效。必须是 'TEST' 或 'PRODUCTION'。")
 
-# --- PostgreSQL数据库配置 (仅当 DATA_STORE_TYPE="database" 时相关) ---
-DB_HOST = get_env_variable("DB_HOST", "localhost")
-DB_PORT = get_env_variable("DB_PORT", "5432")
-DB_NAME = get_env_variable("DB_NAME", "binance_data")
-DB_USER = get_env_variable("DB_USER", "postgres")
-DB_PASSWORD = get_env_variable("DB_PASSWORD", "")
+    # 设置 BASE_INTERVAL 和 AGG_INTERVAL 基于 OPERATING_MODE
+    if config.OPERATING_MODE.upper() == "TEST":
+        config.BASE_INTERVAL = "1m"
+        config.AGG_INTERVAL = "3m"
+    elif config.OPERATING_MODE.upper() == "PRODUCTION":
+        config.BASE_INTERVAL = "1h"
+        config.AGG_INTERVAL = "3h"
 
-# 日志初始化后，记录已加载的配置是个好习惯，
-# 通常在主应用程序设置中。例如：
-# logging.info(f"--- 配置已加载 ---")
-# logging.info(f"API_BASE_URL_FUTURES: {API_BASE_URL_FUTURES}")
-# logging.info(f"SYMBOL: {SYMBOL}")
-# logging.info(f"OPERATING_MODE: {OPERATING_MODE} (基础: {BASE_INTERVAL}, 聚合: {AGG_INTERVAL})")
-# logging.info(f"HISTORICAL_AGG_CANDLES_TO_DISPLAY: {HISTORICAL_AGG_CANDLES_TO_DISPLAY}")
-# logging.info(f"MAX_KLINE_LIMIT_PER_REQUEST: {MAX_KLINE_LIMIT_PER_REQUEST}")
-# logging.info(f"LOG_LEVEL: {LOG_LEVEL_STR} (生效: {LOG_LEVEL})")
-# logging.info(f"DATA_STORE_TYPE: {DATA_STORE_TYPE}")
-# if DATA_STORE_TYPE == "database":
-#     logging.info(f"  DB_HOST: {DB_HOST}")
-#     logging.info(f"  DB_PORT: {DB_PORT}")
-#     logging.info(f"  DB_NAME: {DB_NAME}")
-# logging.info(f"-----------------------------")
+    # 其他验证可以在这里添加
+except ValueError as e:
+    raise RuntimeError(f"配置验证失败：{e}") from e
+
+# 示例：打印配置（在 main_app.py 中使用日志记录）
+# print(f"配置加载成功: {config.model_dump_json(indent=2)}")

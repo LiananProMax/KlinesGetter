@@ -2,12 +2,13 @@
 # -*- coding: utf-8 -*-
 
 import logging
+import structlog
 import pandas as pd
 import psycopg2
 from psycopg2 import extras
 from typing import List, Dict, Any, Optional, Union
 
-from app.core import config # 导入数据库连接详情和间隔配置
+from app.core.config import config # 导入数据库连接详情和间隔配置
 from .data_interfaces import KlinePersistenceInterface
 from .kline_aggregator import aggregate_klines_df
 
@@ -31,7 +32,8 @@ class DBManager(KlinePersistenceInterface):
             "password": config.DB_PASSWORD
         }
         self._initialize_db()
-        logging.info(f"数据库管理器已初始化，表名：'{self.table_name}'。")
+        log = structlog.get_logger()
+        log.info("数据库管理器已初始化", table_name=self.table_name)
 
     def _get_connection(self):
         """建立新的数据库连接。"""
@@ -39,7 +41,8 @@ class DBManager(KlinePersistenceInterface):
             conn = psycopg2.connect(**self.conn_params)
             return conn
         except psycopg2.Error as e:
-            logging.error(f"连接PostgreSQL数据库时出错：{e}")
+            log = structlog.get_logger()
+            log.error("连接PostgreSQL数据库时出错", error=str(e))
             raise
 
     def _execute_with_connection(self, query, params=None):
@@ -72,9 +75,11 @@ class DBManager(KlinePersistenceInterface):
                 with conn.cursor() as cur:
                     cur.execute(create_table_query)
                 # 自动提交事务 (with块结束时)
-            logging.info(f"表 '{self.table_name}' 已确保存在。")
+            log = structlog.get_logger()
+            log.info("表已确保存在", table_name=self.table_name)
         except psycopg2.Error as e:
-            logging.error(f"初始化数据库表 {self.table_name} 时出错：{e}")
+            log = structlog.get_logger()
+            log.error("初始化数据库表时出错", table_name=self.table_name, error=str(e))
             # 如果表创建失败，应用程序可能无法正常运行。
             raise
 
@@ -118,11 +123,14 @@ class DBManager(KlinePersistenceInterface):
                 with conn.cursor() as cur:
                     psycopg2.extras.execute_values(cur, insert_query, data_to_insert, page_size=100)
                 # 自动提交事务
-            logging.debug(f"成功插入/更新 {len(data_to_insert)} 条K线数据到 {self.table_name}。")
+            log = structlog.get_logger()
+            log.debug("成功插入/更新K线数据", count=len(data_to_insert), table_name=self.table_name)
         except psycopg2.Error as e:
-            logging.error(f"向 {self.table_name} 插入K线数据时出错：{e}")
+            log = structlog.get_logger()
+            log.error("向表插入K线数据时出错", table_name=self.table_name, error=str(e))
         except Exception as ex: # 捕获其他潜在错误，如数据准备期间的错误
-            logging.error(f"add_klines过程中发生意外错误：{ex}")
+            log = structlog.get_logger()
+            log.error("add_klines过程中发生意外错误", error=str(ex))
 
     def add_single_kline(self, kline_dict: Dict[str, Any]):
         """将单个K线字典添加到数据库。"""
@@ -144,7 +152,8 @@ class DBManager(KlinePersistenceInterface):
             agg_td = pd.Timedelta(self._agg_interval_str)
 
             if base_td.total_seconds() == 0 or agg_td.total_seconds() == 0 : # 有效间隔不应发生这种情况
-                logging.warning(f"基础间隔'{self._base_interval_str}'或聚合间隔'{self._agg_interval_str}'解析为零持续时间。")
+                log = structlog.get_logger()
+                log.warning("间隔解析为零持续时间", base_interval=self._base_interval_str, agg_interval=self._agg_interval_str)
                 # 如果间隔解析失败，设置一个较大的默认值，假设1分钟基础K线用于3小时聚合。
                 base_intervals_per_agg = 180
             else:
@@ -154,11 +163,13 @@ class DBManager(KlinePersistenceInterface):
             num_base_rows_to_fetch = int((self._historical_candles_to_display_count + 20) * base_intervals_per_agg)
 
             if num_base_rows_to_fetch <= 0: # 安全检查
-                logging.warning(f"计算出的num_base_rows_to_fetch为{num_base_rows_to_fetch}。使用默认值5000。")
+                log = structlog.get_logger()
+                log.warning("计算出的行数无效，使用默认值", num_base_rows_to_fetch=num_base_rows_to_fetch, default_value=5000)
                 num_base_rows_to_fetch = 5000 # 一个合理的回退值
 
         except Exception as e_calc:
-            logging.error(f"在DBManager.get_klines_df中计算要获取的行数时出错：{e_calc}。使用默认值。")
+            log = structlog.get_logger()
+            log.error("计算要获取的行数时出错", error=str(e_calc))
             # 基于典型TEST模式的默认值（例如，从1分钟基础聚合为3分钟）显示50个K线+缓冲区。
             # (50个要显示的K线 + 20个缓冲区K线) * (3分钟聚合间隔 / 1分钟基础间隔) = 70 * 3 = 210
             # 如果是PRODUCTION（例如，从1小时基础聚合为3小时）-> 70 * 3 = 210
@@ -190,10 +201,12 @@ class DBManager(KlinePersistenceInterface):
             else: # 即使为空也确保模式匹配
                  df = pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'quote_volume'])
 
-            logging.debug(f"从 {self.table_name} 获取了 {len(df)} 行用于处理。请求了最多 {num_base_rows_to_fetch} 行。")
+            log = structlog.get_logger()
+            log.debug("从表获取数据", table_name=self.table_name, rows_count=len(df), requested_max=num_base_rows_to_fetch)
             return df
         except psycopg2.Error as e:
-            logging.error(f"从 {self.table_name} 获取K线数据时出错：{e}")
+            log = structlog.get_logger()
+            log.error("从表获取K线数据时出错", table_name=self.table_name, error=str(e))
             return pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'quote_volume'])
 
     def get_base_interval_str(self) -> str:
@@ -207,4 +220,5 @@ class DBManager(KlinePersistenceInterface):
 
     def close(self):
         """如果需要显式资源清理的占位符，尽管连接是按方法管理的。"""
-        logging.info(f"{self.table_name} 的数据库管理器正在'关闭'（连接按操作管理）。")
+        log = structlog.get_logger()
+        log.info("数据库管理器正在关闭", table_name=self.table_name, note="连接按操作管理")
