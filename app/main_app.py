@@ -49,7 +49,7 @@ def _process_kline_data(kline_payload):
     """从K线数据载荷中提取并格式化K线数据"""
     if not _is_valid_kline(kline_payload): 
         return None
-        
+
     return {
         'timestamp': pd.to_datetime(kline_payload['t'], unit='ms', utc=True),
         'open': float(kline_payload['o']), 
@@ -67,12 +67,12 @@ def _handle_error(data):
 def _update_kline_store(kline_dict, symbol_ws):
     """更新K线存储并刷新显示"""
     global kline_persistence
-    
+
     kline_persistence.add_single_kline(kline_dict)
-    
+
     current_base_df = kline_persistence.get_klines_df()
     df_aggregated = aggregate_klines_df(current_base_df, kline_persistence.get_agg_interval_str())
-    
+
     _refresh_display(df_aggregated, symbol_ws, current_base_df)
 
 def _refresh_display(df_aggregated, symbol_ws, current_base_df):
@@ -96,6 +96,12 @@ def websocket_message_handler(_, message_str: str):
     try:
         data = json.loads(message_str)
 
+        # 处理订阅确认消息（Binance WebSocket 响应）
+        if 'result' in data and 'id' in data:
+            logging.debug(f"订阅确认消息: {data}")  # 使用调试级别记录，减少日志噪声
+            return  # 不再处理此消息
+
+        # 处理 K 线消息
         if 'e' in data and data['e'] == 'kline':
             kline_dict = _process_kline_data(data['k'])
             if kline_dict:
@@ -103,8 +109,10 @@ def websocket_message_handler(_, message_str: str):
                 base_interval_stream = data['k']['i']
                 logging.debug(f"收到{symbol_ws}的已关闭{base_interval_stream}K线 @ {kline_dict['timestamp']}")
                 _update_kline_store(kline_dict, symbol_ws)
+        # 处理错误消息
         elif 'e' in data and data['e'] == 'error':
             _handle_error(data)
+        # 处理其他未知消息
         else:
             logging.warning(f"未知消息类型: {data}")
 
@@ -162,7 +170,7 @@ def main_application():
         base_intervals_per_agg = agg_td.total_seconds() / base_td.total_seconds()
         if base_intervals_per_agg <= 0: # 应该被前面的检查捕获，但还是检查一下
             raise ValueError("计算的 base_intervals_per_agg 无效。")
-            
+
     except Exception as e_calc:
         logging.error(f"计算间隔比率时出错：{e_calc}。"
                       f"BASE_INTERVAL: '{config.BASE_INTERVAL}', AGG_INTERVAL: '{config.AGG_INTERVAL}'. "
@@ -172,7 +180,7 @@ def main_application():
     # 添加缓冲区（例如，再增加5个聚合间隔）以进行计算并确保有足够的数据
     num_base_klines_needed = int((config.HISTORICAL_AGG_CANDLES_TO_DISPLAY + 5) * base_intervals_per_agg)
     logging.info(f"计算得到需要获取 {num_base_klines_needed} 个 '{config.BASE_INTERVAL}' {config.SYMBOL} 历史K线...")
-    
+
     historical_klines_list = fetch_historical_klines(
         symbol=config.SYMBOL,
         interval=config.BASE_INTERVAL,
@@ -185,13 +193,13 @@ def main_application():
     if historical_klines_list:
         kline_persistence.add_klines(historical_klines_list)
         logging.info(f"成功处理{len(historical_klines_list)}个历史基础K线。")
-        
+
         base_df_for_initial_agg = kline_persistence.get_klines_df()
         if not base_df_for_initial_agg.empty:
             min_ts = base_df_for_initial_agg['timestamp'].min().isoformat()
             max_ts = base_df_for_initial_agg['timestamp'].max().isoformat()
             logging.info(f"历史基础K线范围：{min_ts}到{max_ts}")
-            
+
             initial_agg_df = aggregate_klines_df(base_df_for_initial_agg, config.AGG_INTERVAL)
             display_historical_aggregated_klines(
                 initial_agg_df,
