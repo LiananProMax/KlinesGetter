@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 import pandas as pd
 from typing import List, Dict, Any
 
@@ -19,6 +20,13 @@ class KlinePersistenceInterface(ABC):
     @abstractmethod
     def add_single_kline(self, kline_dict: Dict[str, Any]):
         """添加单个K线到存储中。"""
+        pass
+
+    @abstractmethod
+    def get_latest_base_kline_timestamp(self) -> datetime | None:
+        """
+        获取存储中最新基础K线的timestamp（开盘时间），或None如果存储为空。
+        """
         pass
 
     @abstractmethod

@@ -79,161 +79,60 @@ def setup_logging():
 
 
 def websocket_message_handler(_, message_str: str):
-    """处理传入的WebSocket K线消息。"""
-    global kline_persistence, trading_strategy, last_processed_agg_candle_timestamp # 访问全局实例
+    """处理传入的WebSocket K线消息，仅负责更新数据存储。"""
 
     if not kline_persistence or not trading_strategy:
-        # This might happen during shutdown or if initialization failed.
-        # Avoid excessive logging if it's a normal shutdown sequence.
-        # if ws_manager and ws_manager.is_active(): # Only log if WS is still active unexpectedly
+        # 这可能发生在关闭时或初始化失败时。
+        # 如果是正常关闭序列，避免过多的日志记录。
+        # if ws_manager and ws_manager.is_active(): # 仅当WS仍然意外活跃时记录
         #      logger.error("websocket_message_handler中未初始化Kline持久化服务或交易策略。")
         return
 
     try:
         data = json.loads(message_str)
 
-        # Check for kline event data
+        # 检查kline事件数据
         if 'e' in data and data['e'] == 'kline' and 'k' in data:
             kline_payload = data['k']
             symbol_stream = kline_payload.get('s')
             base_interval_stream = kline_payload.get('i')
 
-            # Validate symbol and interval match configured ones
+            # 验证符号和间隔是否与配置的匹配
             if symbol_stream.upper() != config.SYMBOL.upper() or base_interval_stream != config.BASE_INTERVAL:
                 logger.warning(f"收到不匹配配置的WS K线数据: {symbol_stream}@{base_interval_stream}. 忽略.")
                 return
 
-            is_base_candle_closed = kline_payload.get('x', False) # 'x' flag indicates if the base candle is closed
+            is_base_candle_closed = kline_payload.get('x', False) # 'x'标志表示基础K线是否已关闭
 
-            # Format the incoming kline data
-            # Use format_kline_from_api helper (assumes structure compatible with original)
-            # Timestamp (kline[0]) is the start time of the base candle. Close time (kline[6]) is the end time.
-            # The dict should include all fields format_kline_from_api expects or provide them.
-            # The WS kline payload has these fields directly.
+            # 格式化传入的K线数据
+            # 使用format_kline_from_api辅助函数（假设结构与原始兼容）
+            # 时间戳（kline[0]）是基础K线的开始时间。收盘时间（kline[6]）是结束时间。
+            # 字典应包含所有format_kline_from_api需要的字段或提供它们。
+            # WS K线负载直接包含这些字段。
             new_kline_dict = {
-                'timestamp': kline_payload.get('t'), # Start time MS
+                'timestamp': kline_payload.get('t'), # 开始时间毫秒
                 'open': kline_payload.get('o', '0'),
                 'high': kline_payload.get('h', '0'),
                 'low': kline_payload.get('l', '0'),
                 'close': kline_payload.get('c', '0'),
                 'volume': kline_payload.get('v', '0'),
-                'close_time': kline_payload.get('T'), # Close time MS
+                'close_time': kline_payload.get('T'), # 收盘时间毫秒
                 'quote_volume': kline_payload.get('q', '0'),
                 'number_of_trades': kline_payload.get('n', 0),
-                'ignore': kline_payload.get('i', 0), # 'i' in payload is ignore, not interval
-                'is_closed': is_base_candle_closed # 'x' in payload
+                'ignore': kline_payload.get('i', 0), # 负载中的'i'是忽略，不是间隔
+                'is_closed': is_base_candle_closed # 负载中的'x'
             }
-            # Convert MS timestamps to timezone-aware datetime objects (UTC)
+            # 将毫秒时间戳转换为带时区的datetime对象（UTC）
             new_kline_dict['timestamp'] = pd.to_datetime(new_kline_dict['timestamp'], unit='ms', utc=True)
             new_kline_dict['close_time'] = pd.to_datetime(new_kline_dict['close_time'], unit='ms', utc=True)
 
-            # Add the new base kline to the persistence layer
+            # 将新的基础K线添加到持久化层
             kline_persistence.add_single_kline(new_kline_dict)
             logger.debug(f"收到并存储了 {config.SYMBOL} 的 {config.BASE_INTERVAL} K线更新 @ {new_kline_dict['timestamp'].isoformat()} (Closed: {is_base_candle_closed})")
-
-
-            # Get all available base klines from storage
-            current_base_df = kline_persistence.get_klines_df()
-            if current_base_df.empty:
-                 logger.warning("websocket_message_handler: 存储中没有基础K线数据。无法进行聚合和策略检查。")
-                 return
-
-            # Ensure base_df has DatetimeIndex for aggregation
-            if 'timestamp' in current_base_df.columns:
-                 try:
-                      current_base_df['timestamp'] = pd.to_datetime(current_base_df['timestamp'], utc=True)
-                      current_base_df = current_base_df.set_index('timestamp').sort_index()
-                 except Exception as e_idx:
-                      logger.error(f"websocket_message_handler: Could not set 'timestamp' as DatetimeIndex for aggregation: {e_idx}. Cannot proceed.")
-                      return
-            elif isinstance(current_base_df.index, pd.DatetimeIndex):
-                pass # Already has DatetimeIndex
-            else:
-                logger.error("websocket_message_handler: Base DataFrame has no DatetimeIndex or 'timestamp' column. Cannot proceed.")
-                return
-
-
-            # Aggregate the data up to the latest available base kline
-            # The aggregation function expects a DatetimeIndex
-            df_aggregated = aggregate_klines_df(current_base_df, kline_persistence.get_agg_interval_str())
-
-            if df_aggregated is None or df_aggregated.empty:
-                 logger.debug("websocket_message_handler: 聚合DataFrame为空。尚未形成完整的聚合K线。")
-                 # Still display the real-time update even if no full agg candle formed yet
-                 display_realtime_update(
-                     df_aggregated, # This will be empty or just forming
-                     config.SYMBOL,
-                     kline_persistence.get_agg_interval_str(),
-                     kline_persistence.get_base_interval_str(),
-                     current_base_df # Pass base df for display context
-                 )
-                 return
-
-            # Ensure aggregated DF has a DatetimeIndex
-            if 'timestamp' in df_aggregated.columns:
-                 df_aggregated['timestamp'] = pd.to_datetime(df_aggregated['timestamp'], utc=True)
-                 df_aggregated = df_aggregated.set_index('timestamp').sort_index()
-            # else: already assumed to have DatetimeIndex from aggregation utility
-
-            # Check if the latest aggregated candle in the aggregated DataFrame is fully CLOSED
-            # The latest aggregated candle is the last row in df_aggregated.
-            # Its close time should be considered the end of the interval.
-            # This aggregated candle is CLOSED if the most recent base candle's close time
-            # is at or beyond the end time of the latest aggregated candle.
-
-            latest_agg_candle_start_time = df_aggregated.index[-1] # DatetimeIndex is the start time
-            agg_interval_delta = interval_to_timedelta(kline_persistence.get_agg_interval_str())
-            latest_agg_candle_end_time = latest_agg_candle_start_time + agg_interval_delta
-
-            # Use the close time from the just received base kline as the current market time reference
-            latest_base_kline_close_time = new_kline_dict['close_time']
-
-            # Add a small tolerance for float comparison of timestamps near boundary
-            tolerance = pd.Timedelta(milliseconds=10)
-
-            # Check if the latest aggregated candle is closed
-            is_latest_agg_candle_closed = latest_base_kline_close_time >= latest_agg_candle_end_time - tolerance # Allow small tolerance
-
-            # Check if we've already processed this specific aggregated candle's close
-            # Use the start time of the aggregated candle as the identifier
-            current_agg_candle_timestamp = df_aggregated.index[-1] # Start time of the latest agg candle
-
-            # Display updates regardless of strategy trigger
-            display_realtime_update(
-                 df_aggregated,
-                 config.SYMBOL, # Pass the symbol from config
-                 kline_persistence.get_agg_interval_str(), # Agg interval
-                 kline_persistence.get_base_interval_str(), # Base interval
-                 current_base_df # Pass base df for display context
-            )
-
-
-            # Trigger strategy ONLY when the latest aggregated candle is closed AND we haven't processed it yet
-            if is_latest_agg_candle_closed and current_agg_candle_timestamp != last_processed_agg_candle_timestamp:
-                 logger.info(f"检测到聚合K线关闭 @ {current_agg_candle_timestamp.isoformat()} (结束时间 {latest_agg_candle_end_time.isoformat()}). 触发策略.")
-
-                 # Update the last processed timestamp BEFORE triggering the strategy
-                 last_processed_agg_candle_timestamp = current_agg_candle_timestamp
-
-                 # Get the necessary historical BASE data for the strategy.
-                 # The strategy needs sufficient base data to form the AGGREGATED DF it calculates indicators on.
-                 # The persistence layer's get_klines_df() should already provide this based on config.
-                 # Pass the full base DF from storage to the strategy.
-                 required_base_df_for_strategy = kline_persistence.get_klines_df() # Get the full base DF from storage
-
-                 if required_base_df_for_strategy.empty:
-                      logger.warning("获取用于策略的基础K线DataFrame为空。无法运行策略。")
-                 else:
-                      # Pass the full base DF to the strategy's candle close handler
-                      # The strategy will aggregate and calculate indicators internally
-                      trading_strategy.on_candle_close(required_base_df_for_strategy)
-
-            # If the base candle is closed but the *aggregated* candle is not,
-            # it might be data for the currently forming aggregated candle.
-            elif is_base_candle_closed:
-                 logger.debug(f"Base candle @ {new_kline_dict['timestamp'].isoformat()} closed, but latest aggregated candle @ {current_agg_candle_timestamp.isoformat()} (ends {latest_agg_candle_end_time.isoformat()}) not yet closed based on latest base close time {latest_base_kline_close_time.isoformat()}.")
-            else: # If base candle is not closed (partial update)
-                 logger.debug(f"Base candle @ {new_kline_dict['timestamp'].isoformat()} is not closed (partial update). Skipping strategy check.")
+            
+            # 数据已存储。主循环将处理检查聚合K线关闭和触发策略。
+            # 可选：在此处添加逻辑，如果需要在任何新的基础K线上立即触发显示更新。
+            # 现在，显示更新与策略触发/调度相关联。
 
 
         elif 'e' in data and data['e'] == 'error':
@@ -316,6 +215,9 @@ def main_application():
         logger.critical("无法连接到 Binance API 或获取交易信息。请检查网络连接、API 密钥和配置。")
         # If no valid client or exchange info, application cannot function.
         sys.exit(1) # Critical failure, exit.
+
+    # 获取聚合间隔时间差以进行调度
+    agg_interval_timedelta = interval_to_timedelta(config.AGG_INTERVAL)
 
 
     # --- 初始化数据持久化服务（内存或数据库） ---
@@ -468,14 +370,55 @@ def main_application():
         sys.exit(1)
 
 
-    # 3. 主循环（保持活动并检查WebSocket状态）
-    # 主线程在这里阻塞，等待WebSocket回调处理数据和触发策略
-    # 同时定期检查WebSocket连接是否活跃
+    # 3. 主循环（实现定时策略执行和WebSocket状态检查）
+    # 主线程在这里实现定时策略执行和WebSocket状态检查
     try:
         logger.info("应用程序正在运行。按 Ctrl+C 停止。")
+
+        # 确定当前聚合间隔的开始时间
+        # 第一次策略运行应该发生在*下一个*聚合K线关闭时。
+        now_utc = datetime.now(timezone.utc)
+        # 将当前时间对齐到当前聚合间隔的开始
+        current_agg_interval_start = align_timestamp_to_interval(now_utc, agg_interval_timedelta, direction='start')
+        # 下一个聚合K线关闭时间是current_agg_interval_start + agg_interval_timedelta
+        next_agg_candle_close_time = current_agg_interval_start + agg_interval_timedelta
+
+        logger.info(f"当前UTC时间: {now_utc.isoformat()}")
+        logger.info(f"当前聚合间隔 '{config.AGG_INTERVAL}' 开始时间: {current_agg_interval_start.isoformat()}")
+        logger.info(f"下一次策略执行（聚合K线关闭时间）计划在: {next_agg_candle_close_time.isoformat()}")
+
         while True:
-            time.sleep(config.POSITION_CLOSE_VERIFY_DELAY) # Use close verify delay for loop interval (arbitrary choice)
-            # Check WS manager state if it exists
+            now_utc = datetime.now(timezone.utc)
+
+            # 如果当前时间大于或等于下一个计划的策略执行时间
+            if now_utc >= next_agg_candle_close_time:
+                logger.system(f"检测到聚合K线关闭时间 @ {next_agg_candle_close_time.isoformat()}. 准备触发策略.")
+
+                # --- 触发策略执行 ---
+                if trading_strategy and kline_persistence:
+                    # 从存储中获取所有可用的基础K线传递给策略
+                    all_base_klines_df = kline_persistence.get_klines_df()
+                    if all_base_klines_df is None or all_base_klines_df.empty:
+                         logger.warning("主循环: 获取用于策略的基础K线DataFrame为空。无法运行策略此周期。")
+                    else:
+                        # 将完整的基础DF和计划的关闭时间传递给策略
+                        # 策略负责验证数据并执行逻辑。
+                        trading_strategy.on_candle_close(all_base_klines_df, next_agg_candle_close_time)
+
+                else:
+                    logger.error("主循环: 交易策略或K线持久化服务未初始化。无法触发策略。")
+
+                # 计算下一次计划的策略执行时间
+                # 在当前计划的关闭时间上添加一个聚合间隔持续时间
+                next_agg_candle_close_time = next_agg_candle_close_time + agg_interval_timedelta
+                logger.info(f"下一次策略执行计划在: {next_agg_candle_close_time.isoformat()}")
+
+            # 计算到下一次计划执行或状态检查所需的睡眠时间
+            time_to_sleep = (next_agg_candle_close_time - datetime.now(timezone.utc)).total_seconds()
+            # 确保睡眠时间不为负值且不过长（例如，最多1分钟或直到下次检查）
+            sleep_duration = max(1, min(time_to_sleep, 60)) # 至少1秒，最多60秒
+            time.sleep(config.POSITION_CLOSE_VERIFY_DELAY) # 使用close verify delay作为循环间隔（任意选择）
+            # 如果WS管理器存在，检查其状态
             if ws_manager:
                  if not ws_manager.is_active():
                      logger.warning("WebSocket 管理器报告未激活。尝试重启...")

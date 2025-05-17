@@ -23,14 +23,14 @@ from app.api_clients.binance_trading_api import _get_futures_usdt_balance, _get_
 
 def split_symbol_for_coinapi(symbol: str) -> str:
     """
-    Split a Binance symbol into base and quote assets for CoinAPI format (Base_Quote).
-    This is mostly for compatibility/naming consistency with the original strategy,
-    though CoinAPI is not used in the new structure.
-    Example: "AVAXUSDT" -> "AVAX_USDT"
+    将币安的交易对符号分割成基础资产和报价资产，符合CoinAPI格式（Base_Quote）。
+    这主要是为了与原始策略的兼容性/命名一致性，
+    尽管在新结构中不使用CoinAPI。
+    示例："AVAXUSDT" -> "AVAX_USDT"
     """
     symbol_upper = symbol.upper()
-    # Add common quote assets
-    quote_assets = ["USDT", "BUSD", "USDC", "BTC", "ETH", "BNB", "DAI", "PAX", "TUSD", "USDP"] # Added more common ones
+    # 添加常见的报价资产
+    quote_assets = ["USDT", "BUSD", "USDC", "BTC", "ETH", "BNB", "DAI", "PAX", "TUSD", "USDP"] # 添加更多常见的资产
 
     for quote in quote_assets:
         if symbol_upper.endswith(quote):
@@ -39,13 +39,13 @@ def split_symbol_for_coinapi(symbol: str) -> str:
             if base:
                 return f"{base}_{quote}"
 
-    # Fallback for less common symbols or unusual formats
-    # This heuristic is error-prone but attempts a split if standard suffixes fail.
-    # It might be better to have a predefined list or rely on exchange info if possible.
-    # A more robust approach would be to use exchange info to find base/quote assets for the symbol.
-    # For now, keep the original heuristic as a fallback if exchange info isn't readily available.
-    # If called from calculate_trade_qty, we might have symbol_info available or can fetch it.
-    # Let's add a check using exchange info if possible.
+    # 用于不常见符号或非常规格式的后备方案
+    # 这种启发式方法容易出错，但在标准后缀失败时尝试进行分割。
+    # 有一个预定义列表或依赖交易所信息可能更好。
+    # 更完善的方法是使用交易所信息来找到符号的基础/报价资产。
+    # 目前，如果交易所信息不易获得，请保留原始启发式方法作为后备。
+    # 如果从 calculate_trade_qty 调用，我们可能有可用的 symbol_info 或可以获取它。
+    # 如果可能，让我们添加使用交易所信息的检查。
 
     try:
         # Attempt to get base/quote from exchange info if available
@@ -78,12 +78,12 @@ def split_symbol_for_coinapi(symbol: str) -> str:
     return symbol_upper
 
 
-def format_price(price: float | Decimal | str | None, precision: int | None) -> str | None:
+def format_price(price: float | Decimal | str | None, precision: int | None):
     """
-    Format a price value according to the specified precision.
-    Handles float, Decimal, string, or None input for price.
-    Returns string representation or None on error/invalid input.
-    Uses Decimal for calculations.
+    根据指定的精度格式化价格值。
+    处理价格的float、Decimal、字符串或None输入。
+    返回字符串表示或在错误/无效输入时返回None。
+    使用Decimal进行计算。
     """
     if price is None or precision is None:
         # logger.debug("format_price called with None price or precision.")

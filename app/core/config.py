@@ -101,6 +101,10 @@ LOG_LEVEL_MAP = {
 LOG_LEVEL = LOG_LEVEL_MAP.get(LOG_LEVEL_STR, logging.INFO) # 如果字符串无效，默认为INFO
 
 if LOG_LEVEL_STR not in LOG_LEVEL_MAP:
+    # 这可能在Rich日志完全设置之前执行。
+    # 使用基本的print作为备用警告机制。
+    # main_app的setup_logging应使用配置好的日志器再次警告如有必要。
+    # 如果RichHandler设置能够保证早期日志可用，可以移除此基本的print。
     # 如果日志尚未配置，使用基本的print
     print(
         f"警告：.env文件中的LOG_LEVEL '{LOG_LEVEL_STR}'无效。默认使用INFO。"
@@ -116,6 +120,10 @@ DB_PORT = get_env_variable("DB_PORT", "5432")
 DB_NAME = get_env_variable("DB_NAME", "binance_data")
 DB_USER = get_env_variable("DB_USER", "postgres")
 DB_PASSWORD = get_env_variable("DB_PASSWORD", "")
+
+# --- 数据同步/验证配置 ---
+DATA_SYNC_VERIFY_DELAY = get_env_variable("DATA_SYNC_VERIFY_DELAY", 5, int) # 秒
+DATA_SYNC_VERIFY_ATTEMPTS = get_env_variable("DATA_SYNC_VERIFY_ATTEMPTS", 12, int) # 次
 
 # --- 策略参数 (从原始项目提取) ---
 # EMA Settings
@@ -205,17 +213,21 @@ elif OPERATING_MODE == "PRODUCTION":
 
 # 校验基础配置完整性
 if not API_KEY or not API_SECRET:
-    # 如果日志尚未配置，使用基本的print
+    # 如果RichHandler设置能够保证日志可用，可以移除此基本的print。
     print("警告：API_KEY或API_SECRET未配置。交易功能将不可用。")
 
 # 校验策略配置（部分基本校验，更严格的校验在策略类中进行）
 if STRATEGY_CONFIG['SHORT_EMA_LEN'] <= 0 or STRATEGY_CONFIG['LONG_EMA_LEN'] <= 0 or STRATEGY_CONFIG['RSI_LEN'] <= 0 or STRATEGY_CONFIG['SHORT_EMA_LEN'] >= STRATEGY_CONFIG['LONG_EMA_LEN']:
+    # 如果RichHandler设置能够保证日志可用，可以移除此基本的print。
     print("警告：EMA/RSI长度配置无效。请检查SHORT_EMA_LEN和LONG_EMA_LEN。")
 if not (0 <= STRATEGY_CONFIG['RSI_OVERSOLD'] < STRATEGY_CONFIG['RSI_OVERBOUGHT'] <= 100):
+    # 如果RichHandler设置能够保证日志可用，可以移除此基本的print。
     print("警告：RSI超买/超卖配置无效。请检查RSI_OVERBOUGHT和RSI_OVERSOLD。")
 if STRATEGY_CONFIG['VWAP_PERIOD'] not in ['D', 'W', 'M']:
+     # 如果RichHandler设置能够保证日志可用，可以移除此基本的print。
      print(f"警告：VWAP_PERIOD '{STRATEGY_CONFIG['VWAP_PERIOD']}' 无效。使用'D', 'W', 'M'。")
 if not (0.0 < STRATEGY_CONFIG['QTY_PERCENT'] <= 1.0):
+    # 如果RichHandler设置能够保证日志可用，可以移除此基本的print。
     print(f"警告：QTY_PERCENT '{STRATEGY_CONFIG['QTY_PERCENT']}' 无效。应在(0, 1]范围内。")
 
 

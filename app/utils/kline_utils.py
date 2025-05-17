@@ -3,6 +3,8 @@
 
 import pandas as pd
 from datetime import timedelta, datetime, timezone # 导入datetime和timedelta
+import decimal
+from decimal import Decimal
 # 使用app的日志
 import logging
 logger = logging.getLogger(__name__) # 获取logger
@@ -45,7 +47,7 @@ def get_pandas_resample_interval(binance_interval_str):
         return binance_interval_str[:-1] + 'MS' # Pandas 'MS' is month start frequency
     else:
         # Fallback or error
-        logging.warning(f"Unknown Binance interval format for pandas resampling: {binance_interval_str}. Returning as-is (may fail).")
+        logger.warning(f"Unknown Binance interval format for pandas resampling: {binance_interval_str}. Returning as-is (may fail).")
         return binance_interval_str
 
 
@@ -69,8 +71,8 @@ def interval_to_timedelta(interval_str: str) -> timedelta:
             # For strategy based on candles, timedelta approximation might be okay,
             # but for precise time calculations across month boundaries, use calendar logic.
             # Given the original Pine Script likely treats months as fixed duration for backtesting,
-            # this approximation might align.
-            logger.warning(f"Using approximated timedelta for month interval '{interval_str}'. Calculation assumes 30 days per month.")
+            # this approximation might align. Ensure this aligns with pandas 'MS' frequency behavior if used.
+            # Note: pandas 'MS' is calendar month start, not fixed 30-day duration.
             return timedelta(days=int(interval_str[:-1]) * 30) # Standard approximation
 
         else:
@@ -82,78 +84,91 @@ def interval_to_timedelta(interval_str: str) -> timedelta:
 
 def align_timestamp_to_interval(timestamp: datetime, interval_delta: timedelta, direction: str = 'start') -> datetime:
     """
-    Aligns a timezone-aware timestamp to the start or end of the nearest interval boundary
-    relative to the Unix epoch (UTC).
+    将带时区的时间戳对齐到相对于Unix纪元(UTC)的最近间隔边界的开始或结束。
 
-    Args:
-        timestamp (datetime): The input timezone-aware timestamp.
-        interval_delta (timedelta): The duration of the interval.
-        direction (str): 'start' to align to the start of the current/previous interval,
-                         'end' to align to the end of the current/next interval.
-                         'nearest' to align to the nearest interval boundary.
+    参数:
+        timestamp (datetime): 输入的带时区的时间戳。
+        interval_delta (timedelta): 间隔的持续时间。
+        direction (str): 'start' 表示对齐到当前/前一个间隔的开始，
+                         'end' 表示对齐到当前/下一个间隔的结束，
+                         'nearest' 表示对齐到最近的间隔边界。
 
-    Returns:
-        datetime: The aligned timezone-aware timestamp (always UTC).
+    返回:
+        datetime: 对齐后的带时区的时间戳(始终为UTC)。
     """
-    # Ensure timestamp is timezone-aware UTC before calculation
+    # 确保时间戳在计算前带有UTC时区信息
     if timestamp.tzinfo is None:
-        # logger.warning(f"Aligning timezone-naive timestamp {timestamp}. Assuming UTC.")
+        # logger.warning(f"对齐无时区的时间戳 {timestamp}。假定为UTC。")
         timestamp_utc = timestamp.replace(tzinfo=timezone.utc)
     else:
         timestamp_utc = timestamp.astimezone(timezone.utc)
 
-    # Unix epoch start (UTC)
+    # Unix纪元起始时间 (UTC)
     epoch_utc = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
-    # Time elapsed since epoch in seconds
+    # 从纪元开始到现在经过的秒数
     elapsed_seconds = (timestamp_utc - epoch_utc).total_seconds()
     interval_seconds = interval_delta.total_seconds()
 
     if interval_seconds <= 0:
-         logger.error(f"Invalid interval_delta for alignment: {interval_delta}")
-         # Return original timestamp as UTC fallback if interval is invalid
+         logger.error(f"用于对齐的间隔无效: {interval_delta}")
+         # 如果间隔无效，返回原始UTC时间戳作为回退方案
          return timestamp_utc
 
-    # Number of full intervals elapsed since epoch (using floor division)
-    num_intervals = elapsed_seconds // interval_seconds
+    # 从纪元开始经过的完整间隔数（使用向下取整除法）
+    # 使用Decimal来提高边界计算的精度
+    elapsed_seconds_dec = Decimal(str(elapsed_seconds))
+    interval_seconds_dec = Decimal(str(interval_seconds))
+
+    # 计算包含该时间戳的间隔的开始
+    # 整数除法会截断，对于正数有效地向下取整
+    start_of_interval_seconds_dec = (elapsed_seconds_dec // interval_seconds_dec) * interval_seconds_dec
 
     if direction == 'start':
-        aligned_seconds = num_intervals * interval_seconds
+        aligned_seconds_dec = start_of_interval_seconds_dec
     elif direction == 'end':
-        # The end of the current interval is the start of the next interval boundary.
-        # This corresponds to the ceiling of (elapsed_seconds / interval_seconds) * interval_seconds.
-        # For a timestamp EXACTLY on an interval start (e.g., 08:00:00 for 1h), its 'end' should be 09:00:00.
-        # For a timestamp WITHIN an interval (e.g., 08:05:00 for 1h), its 'end' should be 09:00:00.
-        # For a timestamp EXACTLY on an interval end (e.g., 09:00:00 for 1h), its 'end' should be 09:00:00.
-        # Using ceil logic: ceil(x/y) * y.
-        if elapsed_seconds == 0: # Epoch start
-            aligned_seconds = interval_seconds # End of the first interval
+        # 从 T 开始持续时间 I 的间隔的'结束'是 T + I。
+        # 因此，包含“时间戳”的间隔的结束是（start_of_interval）+ interval_delta。
+        #
+        # 从 `start_of_interval_seconds_dec` 开始的间隔的结束时间戳
+        # 是 `start_of_interval_seconds_dec + interval_seconds_dec`。
+        # 如果输入的 `timestamp_utc` 正好是 `start_of_interval_seconds_dec`，
+        # 其K线*开始*于该时间，并*结束*于 `start_of_interval_seconds_dec + interval_seconds_dec`。
+        # 如果我们对齐到'结束'，而输入时间戳正好*在*间隔的结束处，
+        # 这意味着从 `timestamp - interval_delta` 到 `timestamp` 的间隔刚刚关闭。
+        # 用于对齐目的的'结束'时间戳应该是 `timestamp`。
+        # 如果时间戳在间隔内（不在其开始或结束处），'结束'是该间隔的结束。
+        # 这个逻辑可能很棘手，取决于确切的需求（包含/排除边界）。
+        # 一种常见的方法是找到时间戳所在的间隔的开始，然后添加间隔增量。
+        # 如果时间戳正好在间隔边界上，这个计算可能需要注意。
+        # 让我们假设'结束'表示*包含*时间戳的间隔的结束。
+        # 示例：时间戳=08:59:00，间隔=1h。开始=08:00:00。结束=09:00:00。
+        # 示例：时间戳=09:00:00，间隔=1h。开始=09:00:00。结束=10:00:00。
+        # 这意味着如果时间戳正好在开始处，简单的start_of_interval + delta可能会偏移一个间隔。
+        # 更安全的方法：找到小于或等于时间戳的开始时间，然后添加interval_delta。
+        # 如果时间戳正好在间隔的*结束*处（例如，08:00-09:00 K线的 09:00:00），
+        # 间隔开始是 timestamp - interval_delta。结束是 timestamp。
+        # 让我们对齐到时间戳*之后*或*正好在*时间戳处的边界（如果它在边界上）。
+        # 这是 ceiling(elapsed_seconds / interval_seconds) * interval_seconds，但需要处理零/负值。
+        # 对于正的elapsed_seconds和interval_seconds：aligned_seconds = ceil(elapsed_seconds / interval_seconds) * interval_seconds
+        # 或：使用整数计算的 (elapsed_seconds + interval_seconds - 1) // interval_seconds * interval_seconds
+        # 使用Decimal来提高精度：
+        if elapsed_seconds_dec <= Decimal('0'): # 处理纪元或负数时间
+             aligned_seconds_dec = Decimal('0') # 第一个间隔的结束是开始 + 增量
         else:
-            # Small tolerance for floats near boundary
-            if abs(elapsed_seconds % interval_seconds) < 1e-9: # Check if it's exactly on a boundary
-                 aligned_seconds = elapsed_seconds # If exactly on boundary, end is that timestamp itself (for historical data) or next boundary (for live)
-                 # For aligning *data points*, if the data point is T, its interval ended at T.
-                 # If aligning a *current time* T to the *next* interval end, use ceil.
-                 # Given this is used for aligning timestamps *of klines* which represent interval starts,
-                 # the 'end' of the interval starting at T is T + interval_delta.
-                 # Let's return the timestamp itself if it's on a boundary, plus delta.
-                 aligned_seconds = num_intervals * interval_seconds + interval_seconds # Start of current + delta
-                 # Refined logic: If timestamp is *exactly* aligned to the start of an interval,
-                 # the "end" of that interval is timestamp + interval_delta.
-                 # If timestamp is within an interval, the "end" is the start of the *next* interval.
-                 # This is equivalent to ceiling(elapsed_seconds / interval_seconds) * interval_seconds IF using 0 as base
-                 # But safer to align to start then add delta.
-                 start_of_current_interval_seconds = num_intervals * interval_seconds
-                 aligned_seconds = start_of_current_interval_seconds + interval_seconds
-
+            # 使用Decimal直接向上取整
+            # 对于正整数a和b，ceil(a/b) = (a + b - 1) // b
+            # 使用Decimal更简单：
+            aligned_seconds_dec = (elapsed_seconds_dec / interval_seconds_dec).quantize(Decimal('1'), rounding=decimal.ROUND_CEILING) * interval_seconds_dec
 
     elif direction == 'nearest':
-         # Nearest interval boundary
-         aligned_seconds = round(elapsed_seconds / interval_seconds) * interval_seconds
+         # 最近的间隔边界
+         aligned_seconds_dec = (elapsed_seconds_dec / interval_seconds_dec).quantize(Decimal('1'), rounding=decimal.ROUND_HALF_UP) * interval_seconds_dec
     else:
-        logger.error(f"Invalid alignment direction: {direction}. Using 'start'.")
-        aligned_seconds = num_intervals * interval_seconds
+        logger.error(f"无效的对齐方向: {direction}。使用 'start'。")
+        aligned_seconds_dec = start_of_interval_seconds_dec
 
-    # Calculate the aligned timestamp, ensure it's timezone-aware UTC
-    aligned_timestamp_utc = epoch_utc + timedelta(seconds=aligned_seconds)
+    # 计算对齐后的时间戳，确保它是带时区的UTC
+    # 将aligned_seconds_dec转换回浮点数作为timedelta构造函数的参数
+    aligned_timestamp_utc = epoch_utc + timedelta(seconds=float(aligned_seconds_dec))
     return aligned_timestamp_utc
