@@ -6,6 +6,7 @@ import pandas as pd
 import psycopg2 # 导入psycopg2
 from psycopg2 import extras
 from typing import List, Dict, Any, Optional
+from datetime import datetime
 
 from app.core import config # 导入数据库连接详情和间隔配置
 from .data_interfaces import KlinePersistenceInterface

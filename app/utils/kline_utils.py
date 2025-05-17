@@ -5,25 +5,76 @@ import pandas as pd
 from datetime import timedelta, datetime, timezone # 导入datetime和timedelta
 import decimal
 from decimal import Decimal
+import traceback
 # 使用app的日志
 import logging
 logger = logging.getLogger(__name__) # 获取logger
 
 def format_kline_from_api(kline_data):
-    """将币安API的单个K线列表转换为字典。"""
-    return {
-        'timestamp': pd.to_datetime(kline_data[0], unit='ms', utc=True),
-        'open': float(kline_data[1]),
-        'high': float(kline_data[2]),
-        'low': float(kline_data[3]),
-        'close': float(kline_data[4]),
-        'volume': float(kline_data[5]),
-        'quote_volume': float(kline_data[7]),
-        # Note: kline_data[6] is close_time, kline_data[8] is number_of_trades
-        # Add them if needed by the strategy indicators (e.g., number_of_trades)
-        'close_time': pd.to_datetime(kline_data[6], unit='ms', utc=True),
-        'number_of_trades': int(kline_data[8]), # Ensure int
-    }
+    """将币安API的单个K线数据转换为字典。
+    支持列表和字典两种输入格式。
+    """
+    # 检查输入是列表还是字典
+    try:
+        if isinstance(kline_data, list):
+            # 列表格式 [开盘时间, 开盘价, 最高价, 最低价, 收盘价, ...]
+            return {
+                'timestamp': pd.to_datetime(kline_data[0], unit='ms', utc=True),
+                'open': float(kline_data[1]),
+                'high': float(kline_data[2]),
+                'low': float(kline_data[3]),
+                'close': float(kline_data[4]),
+                'volume': float(kline_data[5]),
+                'quote_volume': float(kline_data[7]),
+                # kline_data[6] 是 close_time, kline_data[8] 是 number_of_trades
+                'close_time': pd.to_datetime(kline_data[6], unit='ms', utc=True),
+                'number_of_trades': int(kline_data[8]),
+            }
+        elif isinstance(kline_data, dict):
+            # 字典格式，直接遵循组件需要的字段映射
+            result = {}
+            # 时间戳处理
+            if 'openTime' in kline_data or 'time' in kline_data:
+                timestamp = kline_data.get('openTime') or kline_data.get('time')
+                result['timestamp'] = pd.to_datetime(timestamp, unit='ms', utc=True)
+            elif 't' in kline_data:
+                result['timestamp'] = pd.to_datetime(kline_data['t'], unit='ms', utc=True)
+                
+            # 价格和数量信息
+            if 'open' in kline_data or 'o' in kline_data:
+                result['open'] = float(kline_data.get('open') or kline_data.get('o'))
+            if 'high' in kline_data or 'h' in kline_data:
+                result['high'] = float(kline_data.get('high') or kline_data.get('h'))
+            if 'low' in kline_data or 'l' in kline_data:
+                result['low'] = float(kline_data.get('low') or kline_data.get('l'))
+            if 'close' in kline_data or 'c' in kline_data:
+                result['close'] = float(kline_data.get('close') or kline_data.get('c'))
+            if 'volume' in kline_data or 'v' in kline_data:
+                result['volume'] = float(kline_data.get('volume') or kline_data.get('v'))
+            if 'quoteVolume' in kline_data or 'q' in kline_data:
+                result['quote_volume'] = float(kline_data.get('quoteVolume') or kline_data.get('q'))
+            
+            # 收盘时间和交易数量
+            if 'closeTime' in kline_data:
+                result['close_time'] = pd.to_datetime(kline_data['closeTime'], unit='ms', utc=True)
+            elif 'T' in kline_data:
+                result['close_time'] = pd.to_datetime(kline_data['T'], unit='ms', utc=True)
+                
+            if 'numberOfTrades' in kline_data or 'n' in kline_data:
+                result['number_of_trades'] = int(kline_data.get('numberOfTrades') or kline_data.get('n'))
+                
+            return result
+        else:
+            # 无法处理的数据类型
+            logging.error(f"format_kline_from_api: 无法处理的数据类型: {type(kline_data)}")
+            return None
+    except Exception as e:
+        logging.error(f"format_kline_from_api: 格式化K线数据时出错: {e}\n{traceback.format_exc()}")
+        # 如果出错，返回原始数据的字符串表示以便调试
+        return {
+            'error': str(e),
+            'data': str(kline_data)
+        }
 
 def get_pandas_resample_interval(binance_interval_str):
     """将币安间隔字符串转换为Pandas重采样兼容字符串。"""

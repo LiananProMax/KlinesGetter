@@ -42,18 +42,27 @@ def get_env_variable(var_name, default_value, var_type=str):
         )
         return default_value
 
-# --- API配置 ---
-# 币安API Key和Secret（用于需要认证的API）
-API_KEY = get_env_variable("API_KEY", "")
-API_SECRET = get_env_variable("API_SECRET", "")
+# --- API 相关设置 ---
+API_KEY = get_env_variable('API_KEY', '', str)
+API_SECRET = get_env_variable('API_SECRET', '', str)
 # 是否使用测试网 (True/False)
-IS_TESTNET = get_env_variable("IS_TESTNET", True, bool)
+IS_TESTNET = get_env_variable('IS_TESTNET', 'True', str).lower() == 'true'
+# Binance 测试网络基本 URL
+API_BASE_URL = get_env_variable('API_BASE_URL', 'https://testnet.binance.vision', str)
+# Binance 测试网络期货 API URL
+API_BASE_URL_FUTURES = get_env_variable('API_BASE_URL_FUTURES', 'https://testnet.binance.vision', str)
+# Binance 测试网络 WebSocket URL
+WS_BASE_URL = get_env_variable('WS_BASE_URL', 'wss://testnet.binance.vision/ws', str)
+# Binance 测试网络期货 WebSocket URL
+WS_BASE_URL_FUTURES = get_env_variable('WS_BASE_URL_FUTURES', 'wss://testnet.binance.vision/ws', str)
 
-API_BASE_URL_FUTURES = get_env_variable("API_BASE_URL_FUTURES", "https://fapi.binance.com")  # 用于USDⓈ-M期货
+# SSL 证书验证设置
+# 注意: 在生产环境中应始终保持 VERIFY_SSL=True
+VERIFY_SSL = get_env_variable('VERIFY_SSL', 'True', str).lower() == 'true'
 
 # API调用重试配置
-MAX_API_RETRIES = get_env_variable("MAX_API_RETRIES", 3, int)
-API_RETRY_DELAY = get_env_variable("API_RETRY_DELAY", 5, int) # 秒
+MAX_API_RETRIES = get_env_variable('MAX_API_RETRIES', '3', int)
+API_RETRY_DELAY = get_env_variable('API_RETRY_DELAY', '5', int) # 秒
 
 # --- 交易对设置 ---
 SYMBOL = get_env_variable("SYMBOL", "BTCUSDT")
@@ -89,11 +98,52 @@ else:
 
 
 # --- 日志配置 ---
+# 添加自定义日志级别
+
+# SYSTEM 级别 - 定义在 INFO (20) 和 WARNING (30) 之间，值为 25
+SYSTEM_LOG_LEVEL = 25
+logging.addLevelName(SYSTEM_LOG_LEVEL, "SYSTEM")
+
+# 添加 system 方法到 Logger 类
+def system(self, message, *args, **kwargs):
+    if self.isEnabledFor(SYSTEM_LOG_LEVEL):
+        self._log(SYSTEM_LOG_LEVEL, message, args, **kwargs)
+
+# 将 system 方法添加到 Logger 类
+logging.Logger.system = system
+
+# SUCCESS 级别 - 定义在 INFO (20) 和 SYSTEM (25) 之间，值为 22
+SUCCESS_LOG_LEVEL = 22
+logging.addLevelName(SUCCESS_LOG_LEVEL, "SUCCESS")
+
+# 添加 success 方法到 Logger 类
+def success(self, message, *args, **kwargs):
+    if self.isEnabledFor(SUCCESS_LOG_LEVEL):
+        self._log(SUCCESS_LOG_LEVEL, message, args, **kwargs)
+
+# 将 success 方法添加到 Logger 类
+logging.Logger.success = success
+
+# STRATEGY 级别 - 定义在 INFO (20) 和 SUCCESS (22) 之间，值为 21
+STRATEGY_LOG_LEVEL = 21
+logging.addLevelName(STRATEGY_LOG_LEVEL, "STRATEGY")
+
+# 添加 strategy 方法到 Logger 类
+def strategy(self, message, *args, **kwargs):
+    if self.isEnabledFor(STRATEGY_LOG_LEVEL):
+        self._log(STRATEGY_LOG_LEVEL, message, args, **kwargs)
+
+# 将 strategy 方法添加到 Logger 类
+logging.Logger.strategy = strategy
+
 # 从.env获取日志级别字符串并映射到相应的logging常量
 LOG_LEVEL_STR = get_env_variable("LOG_LEVEL", "INFO").upper()
 LOG_LEVEL_MAP = {
     "DEBUG": logging.DEBUG,
     "INFO": logging.INFO,
+    "STRATEGY": STRATEGY_LOG_LEVEL,  # 添加 STRATEGY 级别到映射中
+    "SUCCESS": SUCCESS_LOG_LEVEL,  # 添加 SUCCESS 级别到映射中
+    "SYSTEM": SYSTEM_LOG_LEVEL,  # 添加 SYSTEM 级别到映射中
     "WARNING": logging.WARNING,
     "ERROR": logging.ERROR,
     "CRITICAL": logging.CRITICAL,

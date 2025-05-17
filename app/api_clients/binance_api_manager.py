@@ -5,6 +5,7 @@ import requests
 import time
 import json
 import logging
+import traceback
 import pandas as pd
 from datetime import datetime, timezone
 from binance.websocket.um_futures.websocket_client import UMFuturesWebsocketClient
@@ -102,8 +103,33 @@ def fetch_historical_klines(symbol, interval, num_klines_to_fetch, api_base_url=
 
 
     # 格式化获取到的所有原始K线数据
-    formatted_klines = [format_kline_from_api(k) for k in all_klines_raw_list]
+    formatted_klines = []
+    
+    # 打印一个原始 K 线示例，仅用于调试
+    if all_klines_raw_list and len(all_klines_raw_list) > 0:
+        sample_raw = all_klines_raw_list[0]
+        logging.debug(f"原始 K 线数据示例: {sample_raw}")
+    
+    for k in all_klines_raw_list:
+        try:
+            formatted_kline = format_kline_from_api(k)
+            # 检查是否包含必要的字段
+            if not formatted_kline or 'timestamp' not in formatted_kline:
+                logging.error(f"格式化后的 K 线缺少 'timestamp' 字段: {formatted_kline}")
+                logging.error(f"原始数据: {k}")
+                continue
+            formatted_klines.append(formatted_kline)
+        except Exception as e:
+            logging.error(f"格式化 K 线时出错: {e}\n原始数据: {k}")
+            continue
+    
     logging.info(f"为 {symbol} 总共格式化了 {len(formatted_klines)} 个历史K线。")
+    
+    # 打印一个格式化后的 K 线示例，仅用于调试
+    if formatted_klines and len(formatted_klines) > 0:
+        sample_formatted = formatted_klines[0]
+        logging.debug(f"格式化后的 K 线示例: {sample_formatted}")
+    
     return formatted_klines
 
 class BinanceWebsocketManager:
@@ -126,6 +152,15 @@ class BinanceWebsocketManager:
         try:
             # client=BinanceFuturesClient(api_key, api_secret) # 如果需要认证的流，传递认证信息
             # Binance Websocket Client library uses threading internally
+            # 注意：UMFuturesWebsocketClient 不直接接受 sslopt 参数
+            # 如果需要禁用 SSL 验证，我们需要在环境中设置相关变量
+            if not config.VERIFY_SSL:
+                # 全局禁用证书验证，仅限开发环境使用
+                import ssl
+                import websocket
+                websocket.enableTrace(True)  # 启用 WebSocket 调试输出
+                ssl._create_default_https_context = ssl._create_unverified_context
+            
             self.ws_client = UMFuturesWebsocketClient() # 对于公共流，通常不需要 API Key/Secret
 
             # 订阅 K线流

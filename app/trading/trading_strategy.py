@@ -2,16 +2,18 @@
 # -*- coding: utf-8 -*-
 
 import logging
+import traceback
 import pandas as pd
 from datetime import datetime, timezone
 from decimal import Decimal
 from binance.client import Client
 from app.trading.order_management import OrderManagement  # 导入订单管理模块
 from app.trading.state_sync import StateSync  # 导入状态同步模块
-from app.trading.trade_execution import TradeExecution  # 导入交易执行模块
+from app.trading.trade_execution import TradeExecution, calculate_trade_qty  # 导入交易执行模块和计算交易数量函数
 from app.core import config
+from app.utils.kline_utils import interval_to_timedelta  # 从 kline_utils 导入该函数
 from app.utils.trading_utils import (
-    calculate_trade_qty, format_price, format_quantity,
+    format_price, format_quantity,
     adjust_price_to_tick_size, generate_client_order_id
 )
 from app.api_clients.binance_trading_api import (
@@ -61,7 +63,7 @@ class TradingStrategy:
 
         # 获取间隔时间差
         try:
-            self.interval_timedelta = config.interval_to_timedelta(self.interval_str)  # 从 utils.kline_utils 导入
+            self.interval_timedelta = interval_to_timedelta(self.interval_str)  # 使用从 kline_utils 导入的函数
             if self.interval_timedelta.total_seconds() <= 0:
                 self.logger.critical(f"TradingStrategy: 无效的 INTERVAL_STR '{self.interval_str}'，导致非正的时间差。")
                 raise ValueError(f"无效的 INTERVAL_STR: {self.interval_str}")

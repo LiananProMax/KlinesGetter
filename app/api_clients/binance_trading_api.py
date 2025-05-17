@@ -34,13 +34,19 @@ def safe_api_call(client: Client, func, *args, **kwargs):
 
     for attempt in range(max_retries):
         try:
-            # Ensure timeout is set for requests
-            if 'requests_params' not in kwargs:
-                 kwargs['requests_params'] = {'timeout': 30}
-            elif 'timeout' not in kwargs['requests_params']:
-                 kwargs['requests_params']['timeout'] = 30
-
-            return func(*args, **kwargs)
+            # 有些方法不接受 requests_params 参数，比如 futures_exchange_info
+            # 根据函数名进行特殊处理
+            if func.__name__ in ['futures_exchange_info', 'get_exchange_info']:
+                # 这些方法不接受 requests_params，直接调用
+                return func(*args, **kwargs)
+            else:
+                # 为其他方法添加超时参数
+                if 'requests_params' not in kwargs:
+                    kwargs['requests_params'] = {'timeout': 30}
+                elif 'timeout' not in kwargs['requests_params']:
+                    kwargs['requests_params']['timeout'] = 30
+                
+                return func(*args, **kwargs)
         except BinanceAPIException as e:
             delay = retry_delay * (2 ** attempt) # Basic exponential backoff
             if e.code in [-1003, -1021, -1001, -2015, -2019, -4003]: # Retryable errors (rate limit, timestamp, invalid signature, leverage not set, etc.)
@@ -426,39 +432,40 @@ def cancel_trade_order(client: Client, symbol_str: str, order_id: int, market_ty
             # Futures cancel order by orderId or clientOrderId
             cancel_response = safe_api_call(client, client.futures_cancel_order, symbol=symbol_str, orderId=order_id)
         elif market_type == 'SPOT':
-             # Spot cancel order by orderId or clientOrderId
-             cancel_response = safe_api_call(client, client.cancel_order, symbol=symbol_str, orderId=order_id)
+            # Spot cancel order by orderId or clientOrderId
+            cancel_response = safe_api_call(client, client.cancel_order, symbol=symbol_str, orderId=order_id)
         else:
             logger.error(f"cancel_trade_order: Unknown MARKET_TYPE '{market_type}'")
             return False
 
         # Check if the response indicates success or that the order was already cancelled/filled
         if cancel_response is not None: # safe_api_call returning None means API call failed entirely
-             # Check for the specific status returned by safe_api_call wrapper for 'Unknown order sent'
-             if isinstance(cancel_response, dict) and cancel_response.get("status") == "UNKNOWN_ORDER_OR_ALREADY_CANCELLED":
-                  logger.trading(f"{market_type} order {order_id} was already cancelled/unknown (according to safe_api_call wrapper).")
-                  return True # Consider it cancelled for bot state purposes
-             # Standard successful cancel response varies by market type
-             if market_type == 'FUTURES':
-                 # Futures cancel returns a dict of the cancelled order details
-                 if isinstance(cancel_response, dict) and cancel_response.get('orderId') == order_id and cancel_response.get('status') in ['CANCELED', 'PENDING_CANCEL']:
-                     logger.trading(f"FUTURES order {order_id} cancellation confirmed. Status: {cancel_response.get('status')}")
-                     return True
-                 # Check for Binance specific error code for already cancelled/filled (-2011)
-                 if isinstance(cancel_response, dict) and cancel_response.get('code') == -2011:
-                      logger.trading(f"FUTURES order {order_id} already cancelled/filled (Binance code -2011).")
-                      return True
-
-             elif market_type == 'SPOT':
-                 # Spot cancel can return a list of cancelled orders (usually one)
-                 if isinstance(cancel_response, list) and cancel_response and cancel_response[0].get('orderId') == order_id and cancel_response[0].get('status') in ['CANCELED', 'PENDING_CANCEL']:
-                     logger.trading(f"SPOT order {order_id} cancellation confirmed. Status: {cancel_response[0].get('status')}")
-                     return True
-                 # Check for Binance specific error code for already cancelled/filled (-2011) if the response is a dict error
-                 if isinstance(cancel_response, dict) and cancel_response.get('code') == -2011:
-                      logger.trading(f"SPOT order {order_id} already cancelled/filled (Binance code -2011).")
-                      return True
-
+            # Check for the specific status returned by safe_api_call wrapper for 'Unknown order sent'
+            if isinstance(cancel_response, dict) and cancel_response.get("status") == "UNKNOWN_ORDER_OR_ALREADY_CANCELLED":
+                logger.trading(f"{market_type} order {order_id} was already cancelled/unknown (according to safe_api_call wrapper).")
+                return True # Consider it cancelled for bot state purposes
+            
+            # Standard successful cancel response varies by market type
+            if market_type == 'FUTURES':
+                # Futures cancel returns a dict of the cancelled order details
+                if isinstance(cancel_response, dict) and cancel_response.get('orderId') == order_id and cancel_response.get('status') in ['CANCELED', 'PENDING_CANCEL']:
+                    logger.trading(f"FUTURES order {order_id} cancellation confirmed. Status: {cancel_response.get('status')}")
+                    return True
+                # Check for Binance specific error code for already cancelled/filled (-2011)
+                if isinstance(cancel_response, dict) and cancel_response.get('code') == -2011:
+                    logger.trading(f"FUTURES order {order_id} already cancelled/filled (Binance code -2011).")
+                    return True
+            
+            elif market_type == 'SPOT':
+                # Spot cancel can return a list of cancelled orders (usually one)
+                if isinstance(cancel_response, list) and cancel_response and cancel_response[0].get('orderId') == order_id and cancel_response[0].get('status') in ['CANCELED', 'PENDING_CANCEL']:
+                    logger.trading(f"SPOT order {order_id} cancellation confirmed. Status: {cancel_response[0].get('status')}")
+                    return True
+                # Check for Binance specific error code for already cancelled/filled (-2011) if the response is a dict error
+                if isinstance(cancel_response, dict) and cancel_response.get('code') == -2011:
+                    logger.trading(f"SPOT order {order_id} already cancelled/filled (Binance code -2011).")
+                    return True
+            
             # If we reached here, safe_api_call succeeded but response doesn't confirm cancellation or is ambiguous
             logger.warning(f"{market_type} order {order_id} cancellation attempted, but confirmation unclear. Response: {cancel_response}")
             # In this ambiguous case, assume failure to be safe. Sync will clarify on next run.
