@@ -1,0 +1,50 @@
+// @version=5
+// @description Improved MinhPhan strategy with EMA crossover, VWAP confirmation, and RSI for entries/exits
+
+strategy("Improved MinhPhan EMA VWAP RSI Strategy", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=100)
+
+// Input parameters
+shortLen = input.int(9, "Short EMA Length", minval=1)
+longLen = input.int(21, "Long EMA Length", minval=1)
+rsiLength = input.int(14, "RSI Length", minval=1)
+rsiOverbought = input.int(70, "RSI Overbought", minval=0, maxval=100)
+rsiOversold = input.int(30, "RSI Oversold", minval=0, maxval=100)
+vwapPeriod = input.string("D", "VWAP Period", options=["D", "W", "M"])
+stopLossTicks = input.int(100, "Stop Loss (Ticks)", minval=1)
+takeProfitTicks = input.int(200, "Take Profit (Ticks)", minval=1)
+
+// Calculate indicators
+shortMA = ta.ema(close, shortLen)
+longMA = ta.ema(close, longLen)
+rsi = ta.rsi(close, rsiLength)
+
+// VWAP reset based on selected period
+vwapReset = vwapPeriod == "D" ? timeframe.change("D") : vwapPeriod == "W" ? timeframe.change("W") : timeframe.change("M")
+vwap = ta.vwap(hlc3, vwapReset)
+
+// Plot indicators
+plot(shortMA, color=color.blue, title="Short EMA", linewidth=2)
+plot(longMA, color=color.red, title="Long EMA")
+plot(vwap, color=color.purple, title="VWAP")
+
+// Entry conditions
+longEntry = ta.crossover(shortMA, longMA) and close > vwap and rsi < rsiOverbought
+shortEntry = ta.crossunder(shortMA, longMA) and close < vwap and rsi > rsiOversold
+
+// Execute trades
+if (longEntry)
+    strategy.entry("Long", strategy.long)
+
+if (shortEntry)
+    strategy.entry("Short", strategy.short)
+
+// Exit conditions
+if (rsi > rsiOverbought)
+    strategy.exit("Exit Long", from_entry="Long", loss=stopLossTicks, profit=takeProfitTicks)
+
+if (rsi < rsiOversold)
+    strategy.exit("Exit Short", from_entry="Short", loss=stopLossTicks, profit=takeProfitTicks)
+
+// Plot entry signals
+plotshape(longEntry, title="Long Entry", location=location.belowbar, color=color.green, style=shape.triangleup, size=size.small)
+plotshape(shortEntry, title="Short Entry", location=location.abovebar, color=color.red, style=shape.triangledown, size=size.small)
