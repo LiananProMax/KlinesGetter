@@ -4,7 +4,3 @@ binance-futures-connector
 python-dotenv
 websocket-client
 psycopg2-binary
-python-binance>=1.0.16 # 用于Binance Client API交互
-pandas-ta>=0.3.14b0 # 用于技术指标计算
-numpy>=1.20.0 # pandas-ta依赖
-rich>=13.3.0 # 日志依赖 (如果当前项目未使用Rich，可以考虑移除)

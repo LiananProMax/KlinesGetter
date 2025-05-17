@@ -3,10 +3,9 @@
 
 import logging
 import pandas as pd
-import psycopg2 # 导入psycopg2
+import psycopg2
 from psycopg2 import extras
 from typing import List, Dict, Any, Optional
-from datetime import datetime
 
 from app.core import config # 导入数据库连接详情和间隔配置
 from .data_interfaces import KlinePersistenceInterface
@@ -97,25 +96,12 @@ class DBManager(KlinePersistenceInterface):
         # 确保'timestamp'是datetime对象，其他是数值类型
         data_to_insert = []
         for kline in klines_list_of_dicts:
-            # 检查 kline 是否包含错误信息，如果有，则跳过这个条目
-            if 'error' in kline and 'timestamp' not in kline:
-                logging.warning(f"K线数据格式化错误，跳过: {kline['error']}, 原始数据: {kline['data']}")
-                continue
-                
-            if 'timestamp' not in kline:
-                logging.warning(f"K线数据缺少 timestamp 字段，跳过: {kline}")
-                continue
-                
-            try:
-                dt_object = pd.to_datetime(kline['timestamp'], utc=True)
-                data_to_insert.append((
-                    dt_object,
-                    kline['open'], kline['high'], kline['low'], kline['close'],
-                    kline['volume'], kline['quote_volume']
-                ))
-            except Exception as e:
-                logging.error(f"处理K线数据时出错: {e}, 数据: {kline}")
-                continue
+            dt_object = pd.to_datetime(kline['timestamp'], utc=True)
+            data_to_insert.append((
+                dt_object,
+                kline['open'], kline['high'], kline['low'], kline['close'],
+                kline['volume'], kline['quote_volume']
+            ))
 
         conn = None
         try:
@@ -136,30 +122,6 @@ class DBManager(KlinePersistenceInterface):
     def add_single_kline(self, kline_dict: Dict[str, Any]):
         """将单个K线字典添加到数据库。"""
         self.add_klines([kline_dict])
-
-    def get_latest_base_kline_timestamp(self) -> datetime | None:
-        """从数据库获取最新基础K线的timestamp（开盘时间）。"""
-        query = f"""
-            SELECT timestamp
-            FROM {self.table_name}
-            ORDER BY timestamp DESC
-            LIMIT 1;
-        """
-        conn = None
-        try:
-            conn = self._get_connection()
-            with conn.cursor() as cur:
-                cur.execute(query)
-                row = cur.fetchone()
-            if row:
-                # fetchone returns a tuple, row[0] is the datetime object
-                return row[0]
-            return None # Return None if no rows found
-        except psycopg2.Error as e:
-            logging.error(f"从 {self.table_name} 获取最新时间戳时出错：{e}")
-            return None
-        finally:
-            self._release_connection(conn)
 
     def get_klines_df(self) -> pd.DataFrame:
         """

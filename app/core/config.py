@@ -24,7 +24,7 @@ def get_env_variable(var_name, default_value, var_type=str):
     if value is None:
         # logging.debug(f"环境变量 {var_name} 未找到。使用默认值：{default_value}")
         return default_value
-
+    
     try:
         if var_type == bool: # 布尔值的特殊处理
             if value.lower() in ('true', '1', 't', 'yes', 'y'):
@@ -42,54 +42,20 @@ def get_env_variable(var_name, default_value, var_type=str):
         )
         return default_value
 
-# --- API 相关设置 ---
-# 读取 IS_TESTNET 和 MARKET_TYPE
-IS_TESTNET = get_env_variable('IS_TESTNET', 'False', str).lower() == 'true'
-MARKET_TYPE = get_env_variable('MARKET_TYPE', 'FUTURES').upper()  # "FUTURES" 或 "SPOT"
-
-# 动态选择 API 密钥和 Secret
-if IS_TESTNET:
-    API_KEY = get_env_variable('API_KEY_TEST_FUTURES' if MARKET_TYPE == 'FUTURES' else 'API_KEY_TEST_SPOT', '', str)
-    API_SECRET = get_env_variable('API_SECRET_TEST_FUTURES' if MARKET_TYPE == 'FUTURES' else 'API_SECRET_TEST_SPOT', '', str)
-    API_BASE_URL = 'https://testnet.binance.vision'
-else:
-    API_KEY = get_env_variable('API_KEY_MAIN_FUTURES' if MARKET_TYPE == 'FUTURES' else 'API_KEY_MAIN_SPOT', '', str)
-    API_SECRET = get_env_variable('API_SECRET_MAIN_FUTURES' if MARKET_TYPE == 'FUTURES' else 'API_SECRET_MAIN_SPOT', '', str)
-    API_BASE_URL = 'https://api.binance.com'
-
-# 动态选择期货或现货 API URL
-if MARKET_TYPE == 'FUTURES':
-    API_BASE_URL_FUTURES = API_BASE_URL if IS_TESTNET else 'https://fapi.binance.com'
-    WS_BASE_URL_FUTURES = 'wss://testnet.binance.vision/ws' if IS_TESTNET else 'wss://fstream.binance.com/ws'
-else:  # SPOT
-    API_BASE_URL_FUTURES = None  # 不需要，因为是现货
-    WS_BASE_URL_FUTURES = None
-
-# 设置 WebSocket 基础 URL
-WS_BASE_URL = 'wss://testnet.binance.vision/ws' if IS_TESTNET else 'wss://stream.binance.com:9443/ws'
-
-# SSL 证书验证设置
-# 注意: 在生产环境中应始终保持 VERIFY_SSL=True
-VERIFY_SSL = get_env_variable('VERIFY_SSL', 'True', str).lower() == 'true'
-
-# API调用重试配置
-MAX_API_RETRIES = get_env_variable('MAX_API_RETRIES', '3', int)
-API_RETRY_DELAY = get_env_variable('API_RETRY_DELAY', '5', int) # 秒
+# --- API配置 ---
+API_BASE_URL_FUTURES = get_env_variable("API_BASE_URL_FUTURES", "https://fapi.binance.com")  # 用于USDⓈ-M期货
 
 # --- 交易对设置 ---
 SYMBOL = get_env_variable("SYMBOL", "BTCUSDT")
 
 # --- 运行模式 ---
-# 仅用于决定基础和聚合间隔，不再影响 MARKET_TYPE
-# "TEST": 基础 "1m" -> 聚合 "3m" (测试期间频繁更新)
-# "PRODUCTION": 基础 "1h" -> 聚合 "3h" (更少频率，更稳定的数据)
+# "TEST": 基础"1m" -> 聚合"3m"
+# "PRODUCTION": 基础"1h" -> 聚合"3h"
 OPERATING_MODE = get_env_variable("OPERATING_MODE", "TEST").upper()
 
 # --- K线设置 ---
-# 初始获取和显示的聚合K线数量
-HISTORICAL_AGG_CANDLES_TO_DISPLAY = get_env_variable("HISTORICAL_AGG_CANDLES_TO_DISPLAY", 50, int)
-# 币安API每个请求允许的最大K线数量
-MAX_KLINE_LIMIT_PER_REQUEST = get_env_variable("MAX_KLINE_LIMIT_PER_REQUEST", 1000, int)
+HISTORICAL_AGG_CANDLES_TO_DISPLAY = get_env_variable("HISTORICAL_AGG_CANDLES_TO_DISPLAY", 50, int)  # 显示的初始聚合K线数量
+MAX_KLINE_LIMIT_PER_REQUEST = get_env_variable("MAX_KLINE_LIMIT_PER_REQUEST", 1000, int)  # 每次请求K线的币安API限制
 
 # --- 动态间隔设置（由OPERATING_MODE决定） ---
 BASE_INTERVAL = ""
@@ -107,55 +73,16 @@ else:
     OPERATING_MODE = "TEST" # 无效时回退到TEST
     BASE_INTERVAL = "1m"
     AGG_INTERVAL = "3m"
+    # 如果有效模式对应用程序启动至关重要，可以考虑引发ValueError
+    # raise ValueError(".env中的OPERATING_MODE无效。选择'TEST'或'PRODUCTION'。")
 
 
 # --- 日志配置 ---
-# 添加自定义日志级别
-
-# SYSTEM 级别 - 定义在 INFO (20) 和 WARNING (30) 之间，值为 25
-SYSTEM_LOG_LEVEL = 25
-logging.addLevelName(SYSTEM_LOG_LEVEL, "SYSTEM")
-
-# 添加 system 方法到 Logger 类
-def system(self, message, *args, **kwargs):
-    if self.isEnabledFor(SYSTEM_LOG_LEVEL):
-        self._log(SYSTEM_LOG_LEVEL, message, args, **kwargs)
-
-# 将 system 方法添加到 Logger 类
-logging.Logger.system = system
-
-# SUCCESS 级别 - 定义在 INFO (20) 和 SYSTEM (25) 之间，值为 22
-SUCCESS_LOG_LEVEL = 22
-logging.addLevelName(SUCCESS_LOG_LEVEL, "SUCCESS")
-
-# 添加 success 方法到 Logger 类
-def success(self, message, *args, **kwargs):
-    if self.isEnabledFor(SUCCESS_LOG_LEVEL):
-        self._log(SUCCESS_LOG_LEVEL, message, args, **kwargs)
-
-# 将 success 方法添加到 Logger 类
-logging.Logger.success = success
-
-# STRATEGY 级别 - 定义在 INFO (20) 和 SUCCESS (22) 之间，值为 21
-STRATEGY_LOG_LEVEL = 21
-logging.addLevelName(STRATEGY_LOG_LEVEL, "STRATEGY")
-
-# 添加 strategy 方法到 Logger 类
-def strategy(self, message, *args, **kwargs):
-    if self.isEnabledFor(STRATEGY_LOG_LEVEL):
-        self._log(STRATEGY_LOG_LEVEL, message, args, **kwargs)
-
-# 将 strategy 方法添加到 Logger 类
-logging.Logger.strategy = strategy
-
 # 从.env获取日志级别字符串并映射到相应的logging常量
 LOG_LEVEL_STR = get_env_variable("LOG_LEVEL", "INFO").upper()
 LOG_LEVEL_MAP = {
     "DEBUG": logging.DEBUG,
     "INFO": logging.INFO,
-    "STRATEGY": STRATEGY_LOG_LEVEL,  # 添加 STRATEGY 级别到映射中
-    "SUCCESS": SUCCESS_LOG_LEVEL,  # 添加 SUCCESS 级别到映射中
-    "SYSTEM": SYSTEM_LOG_LEVEL,  # 添加 SYSTEM 级别到映射中
     "WARNING": logging.WARNING,
     "ERROR": logging.ERROR,
     "CRITICAL": logging.CRITICAL,
@@ -163,15 +90,10 @@ LOG_LEVEL_MAP = {
 LOG_LEVEL = LOG_LEVEL_MAP.get(LOG_LEVEL_STR, logging.INFO) # 如果字符串无效，默认为INFO
 
 if LOG_LEVEL_STR not in LOG_LEVEL_MAP:
-    # 这可能在Rich日志完全设置之前执行。
-    # 使用基本的print作为备用警告机制。
-    # main_app的setup_logging应使用配置好的日志器再次警告如有必要。
-    # 如果RichHandler设置能够保证早期日志可用，可以移除此基本的print。
     # 如果日志尚未配置，使用基本的print
     print(
         f"警告：.env文件中的LOG_LEVEL '{LOG_LEVEL_STR}'无效。默认使用INFO。"
     )
-
 
 # --- 数据存储配置 ---
 DATA_STORE_TYPE = get_env_variable("DATA_STORE_TYPE", "memory").lower() # "memory" 或 "database"
@@ -183,146 +105,18 @@ DB_NAME = get_env_variable("DB_NAME", "binance_data")
 DB_USER = get_env_variable("DB_USER", "postgres")
 DB_PASSWORD = get_env_variable("DB_PASSWORD", "")
 
-# --- 数据同步/验证配置 ---
-DATA_SYNC_VERIFY_DELAY = get_env_variable("DATA_SYNC_VERIFY_DELAY", 5, int) # 秒
-DATA_SYNC_VERIFY_ATTEMPTS = get_env_variable("DATA_SYNC_VERIFY_ATTEMPTS", 12, int) # 次
-
-# --- 策略参数 (从原始项目提取) ---
-# EMA Settings
-SHORT_EMA_LEN = get_env_variable('SHORT_EMA_LEN', 9, int)
-LONG_EMA_LEN = get_env_variable('LONG_EMA_LEN', 21, int)
-
-# RSI Settings
-RSI_LEN = get_env_variable('RSI_LEN', 14, int)
-RSI_OVERBOUGHT = get_env_variable('RSI_OVERBOUGHT', 70.0, float)
-RSI_OVERSOLD = get_env_variable('RSI_OVERSOLD', 30.0, float)
-
-# VWAP Settings
-VWAP_PERIOD = get_env_variable('VWAP_PERIOD', 'D', str).upper()
-
-# Stop Loss / Take Profit Settings
-USE_SLTP = get_env_variable('USE_SLTP', True, bool)
-STOP_LOSS_TICKS = get_env_variable('STOP_LOSS_TICKS', 100, float)
-TAKE_PROFIT_TICKS = get_env_variable('TAKE_PROFIT_TICKS', 200, float)
-
-# Order Management Parameters
-QTY_PERCENT = get_env_variable('QTY_PERCENT', 0.90, float)
-
-# 交易类型枚举 (从原始项目提取，放在这里方便全局访问)
-SIDE_BUY = 'BUY'
-SIDE_SELL = 'SELL'
-SIDE_LONG = 'LONG' # 期货多头仓位标识
-SIDE_SHORT = 'SHORT' # 期货空头仓位标识
-
-ORDER_TYPE_MARKET = 'MARKET'
-ORDER_TYPE_LIMIT = 'LIMIT'
-ORDER_TYPE_STOP_LOSS = 'STOP_LOSS'
-ORDER_TYPE_TAKE_PROFIT = 'TAKE_PROFIT'
-
-FUTURE_ORDER_TYPE_MARKET = 'MARKET'
-FUTURE_ORDER_TYPE_LIMIT = 'LIMIT'
-FUTURE_ORDER_TYPE_STOP = 'STOP' # 期货止损单
-FUTURE_ORDER_TYPE_STOP_MARKET = 'STOP_MARKET' # 期货市价止损
-FUTURE_ORDER_TYPE_TAKE_PROFIT = 'TAKE_PROFIT' # 期货止盈单
-FUTURE_ORDER_TYPE_TAKE_PROFIT_MARKET = 'TAKE_PROFIT_MARKET' # 期货市价止盈
-
-TIME_IN_FORCE_GTC = 'GTC' # Good Till Cancelled
-TIME_IN_FORCE_IOC = 'IOC' # Immediate or Cancel
-
-# Order Status Check (用于简单的阻塞式订单状态检查，非推荐方式)
-ORDER_STATUS_CHECK_DELAY = get_env_variable('ORDER_STATUS_CHECK_DELAY', 2, int) # 秒
-POSITION_CLOSE_VERIFY_DELAY = get_env_variable('POSITION_CLOSE_VERIFY_DELAY', 3, int) # 秒
-POSITION_CLOSE_VERIFY_ATTEMPTS = get_env_variable('POSITION_CLOSE_VERIFY_ATTEMPTS', 5, int) # 次
-
-# K线数据处理需要的最小历史窗口长度
-MAX_DF_LEN_STRATEGY = get_env_variable('MAX_DF_LEN_STRATEGY', 1000, int) # 策略模块内部维护的历史K线长度
-
-# 将所有配置参数整合到一个字典中，方便传递给策略类
-STRATEGY_CONFIG = {
-    'SYMBOL': SYMBOL,
-    'MARKET_TYPE': MARKET_TYPE,  # 现在直接从 .env 读取
-    'INTERVAL_STR': AGG_INTERVAL, # 策略运行在聚合间隔上
-    'SHORT_EMA_LEN': SHORT_EMA_LEN,
-    'LONG_EMA_LEN': LONG_EMA_LEN,
-    'RSI_LEN': RSI_LEN,
-    'RSI_OVERBOUGHT': RSI_OVERBOUGHT,
-    'RSI_OVERSOLD': RSI_OVERSOLD,
-    'VWAP_PERIOD': VWAP_PERIOD,
-    'USE_SLTP': USE_SLTP,
-    'STOP_LOSS_TICKS': STOP_LOSS_TICKS,
-    'TAKE_PROFIT_TICKS': TAKE_PROFIT_TICKS,
-    'QTY_PERCENT': QTY_PERCENT,
-    'ORDER_STATUS_CHECK_DELAY': ORDER_STATUS_CHECK_DELAY,
-    'POSITION_CLOSE_VERIFY_DELAY': POSITION_CLOSE_VERIFY_DELAY,
-    'POSITION_CLOSE_VERIFY_ATTEMPTS': POSITION_CLOSE_VERIFY_ATTEMPTS,
-    'MAX_DF_LEN_STRATEGY': MAX_DF_LEN_STRATEGY, # 传递给策略的DF长度限制
-    # 需要根据 OPERATING_MODE 映射到 FUTURES/SPOT，这在 main_app 或策略初始化中处理
-    # 需要 Spot 的引用资产 SPOT_QUOTE_ASSET，如果支持 Spot 交易
-    # 'SPOT_QUOTE_ASSET': SPOT_QUOTE_ASSET # 如果需要 Spot
-}
-
-# 修正：根据 OPERATING_MODE 确定 MARKET_TYPE
-if OPERATING_MODE == "TEST":
-    # 假设TEST模式用于期货测试网
-    STRATEGY_CONFIG['MARKET_TYPE'] = 'FUTURES'
-elif OPERATING_MODE == "PRODUCTION":
-    # 假设PRODUCTION模式用于期货主网
-    STRATEGY_CONFIG['MARKET_TYPE'] = 'FUTURES' # 如果也支持 SPOT，需要额外的配置或逻辑判断
-    # 如果 PRODUCTION 需要在现货主网运行，则设置为 'SPOT'
-    # STRATEGY_CONFIG['MARKET_TYPE'] = 'SPOT'
-    # 如果是SPOT，则需要 SPOT_QUOTE_ASSET
-    # STRATEGY_CONFIG['SPOT_QUOTE_ASSET'] = get_env_variable('SPOT_QUOTE_ASSET', 'USDT', str).upper()
-
-# 校验基础配置完整性
-if not API_KEY or not API_SECRET:
-    print("警告：API_KEY 或 API_SECRET 未配置。交易功能将不可用。")
-# 增加 MARKET_TYPE 校验
-if MARKET_TYPE not in ['FUTURES', 'SPOT']:
-    print(f"错误：.env 文件中的 MARKET_TYPE '{MARKET_TYPE}' 无效。必须是 'FUTURES' 或 'SPOT'。")
-    import sys
-    sys.exit(1)  # 直接退出以防止错误运行
-
-# 校验原始配置
-    # 如果RichHandler设置能够保证日志可用，可以移除此基本的print。
-    print("警告：API_KEY或API_SECRET未配置。交易功能将不可用。")
-
-# 校验策略配置（部分基本校验，更严格的校验在策略类中进行）
-if STRATEGY_CONFIG['SHORT_EMA_LEN'] <= 0 or STRATEGY_CONFIG['LONG_EMA_LEN'] <= 0 or STRATEGY_CONFIG['RSI_LEN'] <= 0 or STRATEGY_CONFIG['SHORT_EMA_LEN'] >= STRATEGY_CONFIG['LONG_EMA_LEN']:
-    # 如果RichHandler设置能够保证日志可用，可以移除此基本的print。
-    print("警告：EMA/RSI长度配置无效。请检查SHORT_EMA_LEN和LONG_EMA_LEN。")
-if not (0 <= STRATEGY_CONFIG['RSI_OVERSOLD'] < STRATEGY_CONFIG['RSI_OVERBOUGHT'] <= 100):
-    # 如果RichHandler设置能够保证日志可用，可以移除此基本的print。
-    print("警告：RSI超买/超卖配置无效。请检查RSI_OVERBOUGHT和RSI_OVERSOLD。")
-if STRATEGY_CONFIG['VWAP_PERIOD'] not in ['D', 'W', 'M']:
-     # 如果RichHandler设置能够保证日志可用，可以移除此基本的print。
-     print(f"警告：VWAP_PERIOD '{STRATEGY_CONFIG['VWAP_PERIOD']}' 无效。使用'D', 'W', 'M'。")
-if not (0.0 < STRATEGY_CONFIG['QTY_PERCENT'] <= 1.0):
-    # 如果RichHandler设置能够保证日志可用，可以移除此基本的print。
-    print(f"警告：QTY_PERCENT '{STRATEGY_CONFIG['QTY_PERCENT']}' 无效。应在(0, 1]范围内。")
-
-
-# Log configuration details after logging is set up in main_app
-
-# --- 工具函数 ---
-def interval_to_timedelta(interval_str):
-    """
-    将时间间隔字符串（如 '1m', '3h', '1d'）转换为 pandas Timedelta 对象。
-    """
-    import pandas as pd
-    
-    unit = interval_str[-1]  # 最后一个字符是单位（m、h、d等）
-    value = int(interval_str[:-1])  # 前面的部分是数值
-    
-    if unit == 'm':
-        return pd.Timedelta(minutes=value)
-    elif unit == 'h':
-        return pd.Timedelta(hours=value)
-    elif unit == 'd':
-        return pd.Timedelta(days=value)
-    elif unit == 'w':
-        return pd.Timedelta(weeks=value)
-    elif unit == 'M':  # 月份，这里简化处理为30天
-        return pd.Timedelta(days=30*value)
-    else:
-        raise ValueError(f"不支持的时间间隔单位: {unit}")
-
+# 日志初始化后，记录已加载的配置是个好习惯，
+# 通常在主应用程序设置中。例如：
+# logging.info(f"--- 配置已加载 ---")
+# logging.info(f"API_BASE_URL_FUTURES: {API_BASE_URL_FUTURES}")
+# logging.info(f"SYMBOL: {SYMBOL}")
+# logging.info(f"OPERATING_MODE: {OPERATING_MODE} (基础: {BASE_INTERVAL}, 聚合: {AGG_INTERVAL})")
+# logging.info(f"HISTORICAL_AGG_CANDLES_TO_DISPLAY: {HISTORICAL_AGG_CANDLES_TO_DISPLAY}")
+# logging.info(f"MAX_KLINE_LIMIT_PER_REQUEST: {MAX_KLINE_LIMIT_PER_REQUEST}")
+# logging.info(f"LOG_LEVEL: {LOG_LEVEL_STR} (生效: {LOG_LEVEL})")
+# logging.info(f"DATA_STORE_TYPE: {DATA_STORE_TYPE}")
+# if DATA_STORE_TYPE == "database":
+#     logging.info(f"  DB_HOST: {DB_HOST}")
+#     logging.info(f"  DB_PORT: {DB_PORT}")
+#     logging.info(f"  DB_NAME: {DB_NAME}")
+# logging.info(f"-----------------------------")

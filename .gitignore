@@ -59,7 +59,6 @@ venv.bak/
 
 # IDE specific files
 .idea/
-.windsurf/
 .vscode/
 *.swp
 *.swo

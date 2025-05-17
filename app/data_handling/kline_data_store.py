@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import pandas as pd
-import logging # 导入logging
+import logging
 from typing import List, Dict, Any
 from .data_interfaces import KlinePersistenceInterface # 使用相对导入
 
@@ -42,12 +42,6 @@ class KlineDataStore(KlinePersistenceInterface):
     def get_klines_df(self) -> pd.DataFrame:
         """返回当前基础K线的DataFrame副本。"""
         return self.df.copy()
-
-    def get_latest_base_kline_timestamp(self) -> pd.Timestamp | None:
-        """获取内存中最新基础K线的timestamp（开盘时间）。"""
-        if self.df.empty:
-            return None
-        return self.df['timestamp'].iloc[-1]
 
     def get_base_interval_str(self) -> str:
         return self._base_interval_str
