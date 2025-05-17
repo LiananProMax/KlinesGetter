@@ -14,7 +14,7 @@ from app.utils.kline_utils import format_kline_from_api # 虽然现在这里没�
 # 数据处理组件
 from app.data_handling.data_interfaces import KlinePersistenceInterface
 from app.data_handling.kline_data_store import KlineDataStore # 默认内存存储
-# from app.data_handling.db_manager import DBManager # 未来：你的数据库管理器
+from app.data_handling.db_manager import DBManager # 数据库管理器
 from app.data_handling.kline_aggregator import aggregate_klines_df
 
 # API和显示组件
@@ -86,20 +86,26 @@ def main_application():
     setup_logging()
 
     # --- 初始化数据持久化服务 ---
-    # 在未来，你可以根据配置选择实现
-    # if config.DATA_STORE_TYPE == "database":
-    #     kline_persistence = DBManager(
-    #         connection_string=config.DB_CONNECTION_STRING,
-    #         base_interval_str=config.BASE_INTERVAL,
-    #         agg_interval_str=config.AGG_INTERVAL,
-    #         historical_candles_to_display_count=config.HISTORICAL_AGG_CANDLES_TO_DISPLAY
-    #     )
-    # else: # 默认为内存存储
-    kline_persistence = KlineDataStore(
-        base_interval_str=config.BASE_INTERVAL,
-        agg_interval_str=config.AGG_INTERVAL,
-        historical_candles_to_display_count=config.HISTORICAL_AGG_CANDLES_TO_DISPLAY
-    )
+    try:
+        if config.DATA_STORE_TYPE == "database":
+            logging.info("使用数据库存储（PostgreSQL）。")
+            kline_persistence = DBManager(
+                symbol=config.SYMBOL, # 传递交易对以命名表
+                base_interval_str=config.BASE_INTERVAL,
+                agg_interval_str=config.AGG_INTERVAL,
+                historical_candles_to_display_count=config.HISTORICAL_AGG_CANDLES_TO_DISPLAY
+            )
+        else: # 默认为内存存储
+            logging.info("使用内存存储。")
+            kline_persistence = KlineDataStore(
+                base_interval_str=config.BASE_INTERVAL,
+                agg_interval_str=config.AGG_INTERVAL,
+                historical_candles_to_display_count=config.HISTORICAL_AGG_CANDLES_TO_DISPLAY
+            )
+    except Exception as e_store_init:
+        logging.error(f"初始化数据持久化服务失败：{e_store_init}", exc_info=True)
+        return # 没有数据存储就无法继续
+
     logging.info(f"使用 {type(kline_persistence).__name__} 进行数据存储。")
 
 
@@ -186,6 +192,8 @@ def main_application():
     finally:
         if ws_manager:
             ws_manager.stop()
+        if hasattr(kline_persistence, 'close') and callable(getattr(kline_persistence, 'close')):
+            kline_persistence.close() # 如果DBManager有close方法，显式关闭它
         logging.info("应用程序已终止。")
 
 # if __name__ == "__main__": # 移除此部分，因为run.py是入口点

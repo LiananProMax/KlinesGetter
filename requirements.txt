@@ -3,3 +3,4 @@ pandas
 binance-futures-connector
 python-dotenv
 websocket-client
+psycopg2-binary

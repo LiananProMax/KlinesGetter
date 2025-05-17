@@ -95,10 +95,15 @@ if LOG_LEVEL_STR not in LOG_LEVEL_MAP:
         f"警告：.env文件中的LOG_LEVEL '{LOG_LEVEL_STR}'无效。默认使用INFO。"
     )
 
-# --- (未来可能添加) 数据存储配置 ---
-# 未来使用的示例：
-# DATA_STORE_TYPE = get_env_variable("DATA_STORE_TYPE", "memory")
-# DB_CONNECTION_STRING = get_env_variable("DB_CONNECTION_STRING", "")
+# --- 数据存储配置 ---
+DATA_STORE_TYPE = get_env_variable("DATA_STORE_TYPE", "memory").lower() # "memory" 或 "database"
+
+# --- PostgreSQL数据库配置 (仅当 DATA_STORE_TYPE="database" 时相关) ---
+DB_HOST = get_env_variable("DB_HOST", "localhost")
+DB_PORT = get_env_variable("DB_PORT", "5432")
+DB_NAME = get_env_variable("DB_NAME", "binance_data")
+DB_USER = get_env_variable("DB_USER", "postgres")
+DB_PASSWORD = get_env_variable("DB_PASSWORD", "")
 
 # 日志初始化后，记录已加载的配置是个好习惯，
 # 通常在主应用程序设置中。例如：
@@ -109,4 +114,9 @@ if LOG_LEVEL_STR not in LOG_LEVEL_MAP:
 # logging.info(f"HISTORICAL_AGG_CANDLES_TO_DISPLAY: {HISTORICAL_AGG_CANDLES_TO_DISPLAY}")
 # logging.info(f"MAX_KLINE_LIMIT_PER_REQUEST: {MAX_KLINE_LIMIT_PER_REQUEST}")
 # logging.info(f"LOG_LEVEL: {LOG_LEVEL_STR} (生效: {LOG_LEVEL})")
+# logging.info(f"DATA_STORE_TYPE: {DATA_STORE_TYPE}")
+# if DATA_STORE_TYPE == "database":
+#     logging.info(f"  DB_HOST: {DB_HOST}")
+#     logging.info(f"  DB_PORT: {DB_PORT}")
+#     logging.info(f"  DB_NAME: {DB_NAME}")
 # logging.info(f"-----------------------------")
