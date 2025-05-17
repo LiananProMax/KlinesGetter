@@ -15,7 +15,7 @@ from binance.client import Client # 导入Binance Client
 from app.core import config
 from app.utils.kline_utils import format_kline_from_api, interval_to_timedelta, align_timestamp_to_interval # Import interval_to_timedelta and align_timestamp_to_interval
 # 导入交易相关的工具函数和API客户端
-from app.api_clients.binance_trading_api import get_precisions_and_tick_size # 导入获取精度函数
+from app.api_clients.binance_trading_api import get_precisions_and_tick_size, cancel_all_open_orders_for_symbol # 导入获取精度函数和取消订单函数
 
 # 数据处理组件
 from app.data_handling.data_interfaces import KlinePersistenceInterface
@@ -64,7 +64,8 @@ def setup_logging():
     logger.info(f"--- 应用程序启动配置 ---")
     logger.info(f"交易对: {config.SYMBOL}")
     logger.info(f"运行模式: {config.OPERATING_MODE} (基础: {config.BASE_INTERVAL}, 聚合: {config.AGG_INTERVAL})")
-    logger.info(f"市场类型 (策略): {config.STRATEGY_CONFIG.get('MARKET_TYPE', '未知')}") # 从策略配置中获取市场类型
+    logger.info(f"市场类型: {config.MARKET_TYPE}")
+    logger.info(f"是否测试网: {config.IS_TESTNET}") # 从策略配置中获取市场类型
     logger.info(f"显示历史聚合K线数量: {config.HISTORICAL_AGG_CANDLES_TO_DISPLAY}")
     # LOG_LEVEL_STR is not a standard logging attribute, log the level value instead
     logger.info(f"日志级别: {logging.getLevelName(config.LOG_LEVEL)} (配置值: {config.LOG_LEVEL_STR})")
@@ -155,22 +156,22 @@ def main_application():
     setup_logging()
 
     # --- 初始化 Binance 客户端（用于 REST 和 WebSocket API） ---
-    # 客户端需要 API Key 和 Secret 来执行交易操作，但对于公共数据（K线），有时不需要。
-    # 策略需要客户端来进行交易和查仓位。
+    # 验证 MARKET_TYPE 和 IS_TESTNET
+    if config.MARKET_TYPE not in ['FUTURES', 'SPOT']:
+        logger.critical(f"无效的市场类型 '{config.MARKET_TYPE}'。必须是 'FUTURES' 或 'SPOT'。")
+        sys.exit(1)
+        
+    # 客户端需要 API Key 和 Secret 来执行交易操作
     can_trade = False
-    if not config.API_KEY or not config.API_SECRET or config.API_KEY == "替换为您的API密钥" or config.API_SECRET == "替换为您的API密钥":
-        logger.warning("API_KEY 或 API_SECRET 未配置/使用示例值。交易功能将不可用。策略将只能模拟信号。")
+    if not config.API_KEY or not config.API_SECRET:
+        logger.warning(f"API_KEY 或 API_SECRET 未配置。交易功能将不可用。现在在 {config.MARKET_TYPE} 市场类型 {'TESTNET' if config.IS_TESTNET else 'MAINNET'} 环境下模拟信号。")
     else:
         can_trade = True
-        logger.info("API_KEY 和 API_SECRET 已配置。交易功能已启用。")
+        logger.info(f"API_KEY 和 API_SECRET 已配置。交易功能已启用。现在在 {config.MARKET_TYPE} 市场类型 {'TESTNET' if config.IS_TESTNET else 'MAINNET'} 环境下运行。")
 
-
-    logger.system("正在初始化 Binance Client...")
+    logger.system(f"正在初始化 Binance Client用于 {config.MARKET_TYPE} {'testnet' if config.IS_TESTNET else 'mainnet'}...")
     try:
-        # Client初始化需要API Key/Secret，以及测试网/主网设置
-        # 根据 app.core.config 的 IS_TESTNET 来设置
-        # Use base_url specific to futures if MARKET_TYPE is FUTURES (though python-binance Client abstracts this)
-        # Use requests_params for default timeout
+        # 初始化 Binance Client
         binance_client = Client(
             config.API_KEY,
             config.API_SECRET,
@@ -178,27 +179,28 @@ def main_application():
             requests_params={'timeout': 30}
         )
 
-        # Determine which market type client to use for initial ping/exchange info
-        market_type_for_init = config.STRATEGY_CONFIG.get('MARKET_TYPE', 'FUTURES') # Default to FUTURES
-
-        # Attempt to ping API to verify connection and get exchange info
-        if market_type_for_init == 'FUTURES':
-            logger.system("Attempting Binance FUTURES API ping...")
+        # 检查 API 连接并获取交易所信息
+        if config.MARKET_TYPE == 'FUTURES':
+            logger.system("测试 Binance FUTURES API 连接...")
             binance_client.futures_ping()
-            logger.success("Binance Futures API ping successful.")
-            # Fetch futures exchange info
-            logger.system("Fetching Binance FUTURES exchange info...")
+            logger.success("Binance Futures API ping 成功。")
+            # 获取期货交易所信息
+            logger.system("获取 Binance FUTURES 交易所信息...")
             exchange_info = binance_client.futures_exchange_info()
             if not exchange_info:
-                 raise RuntimeError("Failed to fetch Futures exchange info.")
-            logger.success("Binance Futures exchange info fetched.")
+                 raise RuntimeError("获取期货交易所信息失败。")
+            logger.success("Binance Futures 交易所信息获取成功。")
 
-        elif market_type_for_init == 'SPOT':
-            logger.system("Attempting Binance SPOT API ping...")
+        elif config.MARKET_TYPE == 'SPOT':
+            logger.system("测试 Binance SPOT API 连接...")
             binance_client.ping()
-            logger.success("Binance Spot API ping successful.")
-            # Fetch spot exchange info
-            logger.system("Fetching Binance SPOT exchange info...")
+            logger.success("Binance Spot API ping 成功。")
+            # 获取现货交易所信息
+            logger.system("获取 Binance SPOT 交易所信息...")
+            exchange_info = binance_client.get_exchange_info()
+            if not exchange_info:
+                 raise RuntimeError("获取现货交易所信息失败。")
+            logger.success("Binance Spot 交易所信息获取成功。")
             exchange_info = binance_client.get_exchange_info()
             if not exchange_info:
                  raise RuntimeError("Failed to fetch Spot exchange info.")

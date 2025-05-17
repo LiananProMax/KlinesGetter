@@ -43,18 +43,30 @@ def get_env_variable(var_name, default_value, var_type=str):
         return default_value
 
 # --- API 相关设置 ---
-API_KEY = get_env_variable('API_KEY', '', str)
-API_SECRET = get_env_variable('API_SECRET', '', str)
-# 是否使用测试网 (True/False)
-IS_TESTNET = get_env_variable('IS_TESTNET', 'True', str).lower() == 'true'
-# Binance 测试网络基本 URL
-API_BASE_URL = get_env_variable('API_BASE_URL', 'https://testnet.binance.vision', str)
-# Binance 测试网络期货 API URL
-API_BASE_URL_FUTURES = get_env_variable('API_BASE_URL_FUTURES', 'https://testnet.binance.vision', str)
-# Binance 测试网络 WebSocket URL
-WS_BASE_URL = get_env_variable('WS_BASE_URL', 'wss://testnet.binance.vision/ws', str)
-# Binance 测试网络期货 WebSocket URL
-WS_BASE_URL_FUTURES = get_env_variable('WS_BASE_URL_FUTURES', 'wss://testnet.binance.vision/ws', str)
+# 读取 IS_TESTNET 和 MARKET_TYPE
+IS_TESTNET = get_env_variable('IS_TESTNET', 'False', str).lower() == 'true'
+MARKET_TYPE = get_env_variable('MARKET_TYPE', 'FUTURES').upper()  # "FUTURES" 或 "SPOT"
+
+# 动态选择 API 密钥和 Secret
+if IS_TESTNET:
+    API_KEY = get_env_variable('API_KEY_TEST_FUTURES' if MARKET_TYPE == 'FUTURES' else 'API_KEY_TEST_SPOT', '', str)
+    API_SECRET = get_env_variable('API_SECRET_TEST_FUTURES' if MARKET_TYPE == 'FUTURES' else 'API_SECRET_TEST_SPOT', '', str)
+    API_BASE_URL = 'https://testnet.binance.vision'
+else:
+    API_KEY = get_env_variable('API_KEY_MAIN_FUTURES' if MARKET_TYPE == 'FUTURES' else 'API_KEY_MAIN_SPOT', '', str)
+    API_SECRET = get_env_variable('API_SECRET_MAIN_FUTURES' if MARKET_TYPE == 'FUTURES' else 'API_SECRET_MAIN_SPOT', '', str)
+    API_BASE_URL = 'https://api.binance.com'
+
+# 动态选择期货或现货 API URL
+if MARKET_TYPE == 'FUTURES':
+    API_BASE_URL_FUTURES = API_BASE_URL if IS_TESTNET else 'https://fapi.binance.com'
+    WS_BASE_URL_FUTURES = 'wss://testnet.binance.vision/ws' if IS_TESTNET else 'wss://fstream.binance.com/ws'
+else:  # SPOT
+    API_BASE_URL_FUTURES = None  # 不需要，因为是现货
+    WS_BASE_URL_FUTURES = None
+
+# 设置 WebSocket 基础 URL
+WS_BASE_URL = 'wss://testnet.binance.vision/ws' if IS_TESTNET else 'wss://stream.binance.com:9443/ws'
 
 # SSL 证书验证设置
 # 注意: 在生产环境中应始终保持 VERIFY_SSL=True
@@ -68,7 +80,7 @@ API_RETRY_DELAY = get_env_variable('API_RETRY_DELAY', '5', int) # 秒
 SYMBOL = get_env_variable("SYMBOL", "BTCUSDT")
 
 # --- 运行模式 ---
-# 决定基础和聚合间隔。
+# 仅用于决定基础和聚合间隔，不再影响 MARKET_TYPE
 # "TEST": 基础 "1m" -> 聚合 "3m" (测试期间频繁更新)
 # "PRODUCTION": 基础 "1h" -> 聚合 "3h" (更少频率，更稳定的数据)
 OPERATING_MODE = get_env_variable("OPERATING_MODE", "TEST").upper()
@@ -228,7 +240,7 @@ MAX_DF_LEN_STRATEGY = get_env_variable('MAX_DF_LEN_STRATEGY', 1000, int) # 策�
 # 将所有配置参数整合到一个字典中，方便传递给策略类
 STRATEGY_CONFIG = {
     'SYMBOL': SYMBOL,
-    'MARKET_TYPE': OPERATING_MODE, # 使用OPERATING_MODE映射期货/现货，需要进一步细化
+    'MARKET_TYPE': MARKET_TYPE,  # 现在直接从 .env 读取
     'INTERVAL_STR': AGG_INTERVAL, # 策略运行在聚合间隔上
     'SHORT_EMA_LEN': SHORT_EMA_LEN,
     'LONG_EMA_LEN': LONG_EMA_LEN,
@@ -263,6 +275,14 @@ elif OPERATING_MODE == "PRODUCTION":
 
 # 校验基础配置完整性
 if not API_KEY or not API_SECRET:
+    print("警告：API_KEY 或 API_SECRET 未配置。交易功能将不可用。")
+# 增加 MARKET_TYPE 校验
+if MARKET_TYPE not in ['FUTURES', 'SPOT']:
+    print(f"错误：.env 文件中的 MARKET_TYPE '{MARKET_TYPE}' 无效。必须是 'FUTURES' 或 'SPOT'。")
+    import sys
+    sys.exit(1)  # 直接退出以防止错误运行
+
+# 校验原始配置
     # 如果RichHandler设置能够保证日志可用，可以移除此基本的print。
     print("警告：API_KEY或API_SECRET未配置。交易功能将不可用。")
 
@@ -282,3 +302,27 @@ if not (0.0 < STRATEGY_CONFIG['QTY_PERCENT'] <= 1.0):
 
 
 # Log configuration details after logging is set up in main_app
+
+# --- 工具函数 ---
+def interval_to_timedelta(interval_str):
+    """
+    将时间间隔字符串（如 '1m', '3h', '1d'）转换为 pandas Timedelta 对象。
+    """
+    import pandas as pd
+    
+    unit = interval_str[-1]  # 最后一个字符是单位（m、h、d等）
+    value = int(interval_str[:-1])  # 前面的部分是数值
+    
+    if unit == 'm':
+        return pd.Timedelta(minutes=value)
+    elif unit == 'h':
+        return pd.Timedelta(hours=value)
+    elif unit == 'd':
+        return pd.Timedelta(days=value)
+    elif unit == 'w':
+        return pd.Timedelta(weeks=value)
+    elif unit == 'M':  # 月份，这里简化处理为30天
+        return pd.Timedelta(days=30*value)
+    else:
+        raise ValueError(f"不支持的时间间隔单位: {unit}")
+

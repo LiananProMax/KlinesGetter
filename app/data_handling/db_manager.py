@@ -97,12 +97,25 @@ class DBManager(KlinePersistenceInterface):
         # 确保'timestamp'是datetime对象，其他是数值类型
         data_to_insert = []
         for kline in klines_list_of_dicts:
-            dt_object = pd.to_datetime(kline['timestamp'], utc=True)
-            data_to_insert.append((
-                dt_object,
-                kline['open'], kline['high'], kline['low'], kline['close'],
-                kline['volume'], kline['quote_volume']
-            ))
+            # 检查 kline 是否包含错误信息，如果有，则跳过这个条目
+            if 'error' in kline and 'timestamp' not in kline:
+                logging.warning(f"K线数据格式化错误，跳过: {kline['error']}, 原始数据: {kline['data']}")
+                continue
+                
+            if 'timestamp' not in kline:
+                logging.warning(f"K线数据缺少 timestamp 字段，跳过: {kline}")
+                continue
+                
+            try:
+                dt_object = pd.to_datetime(kline['timestamp'], utc=True)
+                data_to_insert.append((
+                    dt_object,
+                    kline['open'], kline['high'], kline['low'], kline['close'],
+                    kline['volume'], kline['quote_volume']
+                ))
+            except Exception as e:
+                logging.error(f"处理K线数据时出错: {e}, 数据: {kline}")
+                continue
 
         conn = None
         try:

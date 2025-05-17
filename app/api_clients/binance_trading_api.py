@@ -199,7 +199,7 @@ def _get_current_futures_status(client: Client, symbol_str: str):
              logger.error(f"Futures Status ({symbol_str}): Expected list from position_information, got {type(positions)}. Data: {positions}")
              return None, 0.0, None, 'PARSE_ERROR'
         if not positions:
-             logger.data(f"Futures Status ({symbol_str}): Empty list from position_information. Assuming no position.")
+             logger.info(f"Futures Status ({symbol_str}): Empty list from position_information. Assuming no position.")
              return None, 0.0, None, 'NO_POSITION'
 
         # In one-way mode, there's one element. In hedge mode, there could be two (LONG/SHORT side).
@@ -226,10 +226,10 @@ def _get_current_futures_status(client: Client, symbol_str: str):
                     # Only return a valid entry price (> 0)
                     valid_entry_price = entry_price if entry_price > 0 else None
 
-                    logger.data(f"Futures Status ({symbol_str}): Found position - Side: {side}, Qty: {quantity}, EntryPrice: {valid_entry_price}")
+                    logger.info(f"Futures Status ({symbol_str}): Found position - Side: {side}, Qty: {quantity}, EntryPrice: {valid_entry_price}")
                     return side, quantity, valid_entry_price, 'OK'
                 else:
-                     logger.data(f"Futures Status ({symbol_str}): Symbol found in positions but amount is zero ({position_amt}).")
+                     logger.info(f"Futures Status ({symbol_str}): Symbol found in positions but amount is zero ({position_amt}).")
                      # Continue checking other entries in case of Hedge Mode, but for one-way, this is the end.
                      # Assuming one-way mode for simplicity matching original bot. If hedge mode needed, loop needs to be more complex.
 
@@ -288,7 +288,7 @@ def _get_current_spot_status(client: Client, symbol_str: str, latest_kline_df: p
          # On API sync, the entry price is UNKNOWN from the API itself.
          synced_entry_price = None # Indicate unknown from API sync
 
-         logger.data(f"Spot Status ({symbol_str}): Found position - Side: {synced_position_side}, Qty: {synced_position_qty}, EntryPrice: Unknown (from API)")
+         logger.info(f"Spot Status ({symbol_str}): Found position - Side: {synced_position_side}, Qty: {synced_position_qty}, EntryPrice: Unknown (from API)")
          return (
              synced_position_side, # 'LONG' or None
              synced_position_qty, # Base asset balance if in position, 0 otherwise
@@ -401,7 +401,7 @@ def place_trade_order(
         # Check the response from safe_api_call
         if order_response and order_response.get('orderId'):
             # Log the full response for successful API interaction
-            logger.data(f"{market_type} {side} {order_type or 'default'} order API Response for {symbol_str} (Qty: {formatted_qty_str}): {order_response}")
+            logger.info(f"{market_type} {side} {order_type or 'default'} order API Response for {symbol_str} (Qty: {formatted_qty_str}): {order_response}")
             # Check if order was accepted by Binance (has an orderId and status is not REJECTED)
             if order_response.get('status', '').upper() != 'REJECTED':
                 logger.order(f"{market_type} {side} {order_type or 'default'} order PLACED for {symbol_str}. Order ID: {order_response['orderId']}")
@@ -614,7 +614,7 @@ def get_open_oco_lists_binance(client: Client, symbol_str: str):
         # Note: Binance API get_open_oco_orders does not have a symbol parameter, it returns ALL open OCOs.
         # We must filter client-side.
         symbol_ocos = [oco for oco in oco_lists if oco.get('symbol') == symbol_str]
-        logger.data(f"OCO Lists ({symbol_str}): Found {len(symbol_ocos)} open OCO list(s) matching symbol.")
+        logger.info(f"OCO Lists ({symbol_str}): Found {len(symbol_ocos)} open OCO list(s) matching symbol.")
         return symbol_ocos
     except Exception as e:
         logger.error(f"get_open_oco_lists_binance: Error fetching open OCO lists for {symbol_str}: {e}", exc_info=True)
@@ -651,7 +651,7 @@ def _get_open_futures_orders(client: Client, symbol_str: str):
             return [] # Return empty list on failure so callers can iterate
 
         # API call succeeded, even if no orders exist, it will return an empty list []
-        logger.data(f"Futures Open Orders ({symbol_str}): Found {len(open_orders)} open order(s).")
+        logger.info(f"Futures Open Orders ({symbol_str}): Found {len(open_orders)} open order(s).")
         return open_orders
     except Exception as e:
         logger.error(f"Futures Open Orders ({symbol_str}): Exception fetching open orders: {e}", exc_info=True)
@@ -686,7 +686,7 @@ def _get_open_spot_orders(client: Client, symbol_str: str):
         else:
             logger.warning(f"Spot Open Orders ({symbol_str}): Failed to fetch OCO lists (returned None).")
 
-        logger.data(f"Spot Open Orders ({symbol_str}): Found {len(all_spot_open_orders)} total open order(s) (regular + OCO legs).")
+        logger.info(f"Spot Open Orders ({symbol_str}): Found {len(all_spot_open_orders)} total open order(s) (regular + OCO legs).")
         return all_spot_open_orders
     except Exception as e:
         logger.error(f"Spot Open Orders ({symbol_str}): Exception fetching open orders: {e}", exc_info=True)
@@ -779,7 +779,7 @@ def verify_position_closed(
     for attempt in range(position_close_verify_attempts):
         # Use time.sleep for blocking delay
         time.sleep(position_close_verify_delay)
-        logger.data(f"Verification attempt {attempt + 1}/{position_close_verify_attempts} for {symbol_str}...")
+        logger.info(f"Verification attempt {attempt + 1}/{position_close_verify_attempts} for {symbol_str}...")
 
         # Get current position status using the helper function
         # Pass latest_kline_df for potential use in SPOT balance check if needed by _get_current_spot_status
@@ -1031,7 +1031,7 @@ def place_spot_oco_sell_order(
             # 'newOrderRespType': 'FULL' # Get full details in response, if needed
         }
         logger.trading(f"Attempting to place SPOT OCO SELL for {quantity} {symbol_str} with TP Limit={price}, SL Trig={stop_price}, SL Limit={stop_limit_price}. ListClientOID: {list_client_order_id}")
-        logger.data(f"SPOT OCO Create Order Params: {params}")
+        logger.info(f"SPOT OCO Create Order Params: {params}")
 
         # Place the OCO order using safe_api_call
         oco_response = safe_api_call(client, client.create_oco_order, **params)
@@ -1040,7 +1040,7 @@ def place_spot_oco_sell_order(
             logger.order(f"SPOT OCO SELL order PLACED for {symbol_str}. List ID: {oco_response['orderListId']}, ClientListID: {list_client_order_id}")
             # Log details of the placed OCO legs if available in response
             for order_report in oco_response.get('orderReports', []):
-                logger.data(f"OCO Leg: ID {order_report.get('orderId')}, ClientOID {order_report.get('clientOrderId')}, Type {order_report.get('type')}, Status {order_report.get('status')}")
+                logger.info(f"OCO Leg: ID {order_report.get('orderId')}, ClientOID {order_report.get('clientOrderId')}, Type {order_report.get('type')}, Status {order_report.get('status')}")
             return oco_response
         else:
             logger.error(f"SPOT OCO SELL order FAILED for {symbol_str}. Response: {oco_response}")

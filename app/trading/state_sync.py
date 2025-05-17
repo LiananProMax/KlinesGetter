@@ -2,7 +2,9 @@
 # -*- coding: utf-8 -*-
 
 import logging
+import traceback
 import pandas as pd
+from decimal import Decimal
 from binance.client import Client
 from app.core import config
 from app.api_clients.binance_trading_api import (
