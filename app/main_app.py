@@ -5,7 +5,10 @@ import logging
 import time
 import json
 import pandas as pd
-from datetime import datetime, timezone 
+from datetime import datetime, timezone
+import ssl
+import certifi
+import requests 
 
 # 配置和工具
 from app.core import config
@@ -83,6 +86,15 @@ def websocket_message_handler(_, message_str: str):
 def main_application():
     global kline_persistence, ws_manager 
 
+    # 设置全局SSL上下文
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+    ssl_context.check_hostname = True  # 启用主机名验证
+    ssl_context.verify_mode = ssl.CERT_REQUIRED  # 强制证书验证
+
+    # 创建一个使用certifi证书的requests Session
+    requests_session = requests.Session()
+    requests_session.verify = certifi.where()
+
     setup_logging()
 
     # --- 初始化数据持久化服务 ---
@@ -137,7 +149,8 @@ def main_application():
         interval=config.BASE_INTERVAL,
         num_klines_to_fetch=num_base_klines_needed,
         api_base_url=config.API_BASE_URL_FUTURES,
-        max_limit_per_request=config.MAX_KLINE_LIMIT_PER_REQUEST
+        max_limit_per_request=config.MAX_KLINE_LIMIT_PER_REQUEST,
+        session=requests_session  # 传递自定义session
     )
 
     if historical_klines_list:
@@ -162,11 +175,12 @@ def main_application():
     else:
         logging.warning("未获取历史K线。仅继续使用实时数据。")
 
-    # 2. 设置并启动WebSocket
+    # 2. 设置并启动WebSocket，传递SSL上下文
     ws_manager = BinanceWebsocketManager(
         symbol=config.SYMBOL,
         base_interval=config.BASE_INTERVAL,
-        on_message_callback=websocket_message_handler
+        on_message_callback=websocket_message_handler,
+        ssl_context=ssl_context  # 传递自定义SSL上下文
     )
     ws_manager.start()
 
