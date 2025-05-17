@@ -5,10 +5,11 @@ import logging
 import pandas as pd
 import psycopg2
 from psycopg2 import extras
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 
 from app.core import config # 导入数据库连接详情和间隔配置
 from .data_interfaces import KlinePersistenceInterface
+from .kline_aggregator import aggregate_klines_df
 
 class DBManager(KlinePersistenceInterface):
     def __init__(self, symbol: str, base_interval_str: str, agg_interval_str: str, historical_candles_to_display_count: int):
@@ -16,7 +17,7 @@ class DBManager(KlinePersistenceInterface):
         self._base_interval_str = base_interval_str
         self._agg_interval_str = agg_interval_str
         self._historical_candles_to_display_count = historical_candles_to_display_count
-        
+
         # 将表名部分进行安全处理
         safe_symbol = ''.join(filter(str.isalnum, self.symbol))
         safe_interval = ''.join(filter(str.isalnum, self._base_interval_str))
@@ -40,7 +41,7 @@ class DBManager(KlinePersistenceInterface):
         except psycopg2.Error as e:
             logging.error(f"连接PostgreSQL数据库时出错：{e}")
             raise
-            
+
     def _execute_with_connection(self, query, params=None):
         """封装数据库操作，管理连接生命周期"""
         with self._get_connection() as conn:
@@ -77,6 +78,13 @@ class DBManager(KlinePersistenceInterface):
             # 如果表创建失败，应用程序可能无法正常运行。
             raise
 
+    def add(self, data: Union[Dict[str, Any], List[Dict[str, Any]]]):
+        """实现抽象方法：添加单个K线字典或K线字典列表到存储中。"""
+        if isinstance(data, list):
+            self.add_klines(data)
+        else:
+            self.add_single_kline(data)
+
     def add_klines(self, klines_list_of_dicts: List[Dict[str, Any]]):
         """将K线字典列表添加到数据库。"""
         if not klines_list_of_dicts:
@@ -93,7 +101,7 @@ class DBManager(KlinePersistenceInterface):
             volume = EXCLUDED.volume,
             quote_volume = EXCLUDED.quote_volume;
         """
-        
+
         # 将字典列表转换为元组列表，用于execute_values
         # 确保'timestamp'是datetime对象，其他是数值类型
         data_to_insert = []
@@ -120,6 +128,11 @@ class DBManager(KlinePersistenceInterface):
         """将单个K线字典添加到数据库。"""
         self.add_klines([kline_dict])
 
+    def get_aggregated(self, agg_interval: str) -> pd.DataFrame:
+        """实现抽象方法：返回按指定间隔聚合的K线数据。"""
+        base_df = self.get_klines_df()
+        return aggregate_klines_df(base_df, agg_interval)
+
     def get_klines_df(self) -> pd.DataFrame:
         """
         从数据库获取K线数据框。
@@ -136,10 +149,10 @@ class DBManager(KlinePersistenceInterface):
                 base_intervals_per_agg = 180
             else:
                 base_intervals_per_agg = agg_td.total_seconds() / base_td.total_seconds()
-            
+
             # 添加缓冲区（例如，再加20个聚合间隔）以确保有足够的数据进行重采样边缘情况
             num_base_rows_to_fetch = int((self._historical_candles_to_display_count + 20) * base_intervals_per_agg)
-            
+
             if num_base_rows_to_fetch <= 0: # 安全检查
                 logging.warning(f"计算出的num_base_rows_to_fetch为{num_base_rows_to_fetch}。使用默认值5000。")
                 num_base_rows_to_fetch = 5000 # 一个合理的回退值
@@ -163,14 +176,14 @@ class DBManager(KlinePersistenceInterface):
             ) AS recent_klines
             ORDER BY timestamp ASC;
         """
-        
+
         try:
             with self._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(query, (num_base_rows_to_fetch,))
                     rows = cur.fetchall()
                     columns = [desc[0] for desc in cur.description]
-            
+
             df = pd.DataFrame(rows, columns=columns)
             if not df.empty and 'timestamp' in df.columns:
                 df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True) # 确保时区

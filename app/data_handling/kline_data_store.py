@@ -3,8 +3,9 @@
 
 import pandas as pd
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
 from .data_interfaces import KlinePersistenceInterface # 使用相对导入
+from .kline_aggregator import aggregate_klines_df
 
 class KlineDataStore(KlinePersistenceInterface):
     def __init__(self, base_interval_str: str, agg_interval_str: str, historical_candles_to_display_count: int):
@@ -13,6 +14,13 @@ class KlineDataStore(KlinePersistenceInterface):
         self._agg_interval_str = agg_interval_str
         self._historical_candles_to_display_count = historical_candles_to_display_count
         logging.info(f"KlineDataStore初始化完成，用于{base_interval_str} -> {agg_interval_str}。")
+
+    def add(self, data: Union[Dict[str, Any], List[Dict[str, Any]]]):
+        """实现抽象方法：添加单个K线字典或K线字典列表到存储中。"""
+        if isinstance(data, list):
+            self.add_klines(data)
+        else:
+            self.add_single_kline(data)
 
     def add_klines(self, klines_list_of_dicts: List[Dict[str, Any]]):
         """向存储中添加新的K线字典列表。"""
@@ -29,15 +37,20 @@ class KlineDataStore(KlinePersistenceInterface):
             self.df = new_klines_df
         else:
             self.df = pd.concat([self.df, new_klines_df], ignore_index=True)
-        
+
         self.df = self.df.drop_duplicates(subset=['timestamp'], keep='last')
         self.df = self.df.sort_values(by='timestamp').reset_index(drop=True)
-        
+
         self._manage_memory()
 
     def add_single_kline(self, kline_dict: Dict[str, Any]):
         """添加单个K线字典，通常来自WebSocket。"""
         self.add_klines([kline_dict])
+
+    def get_aggregated(self, agg_interval: str) -> pd.DataFrame:
+        """实现抽象方法：返回按指定间隔聚合的K线数据。"""
+        base_df = self.get_klines_df()
+        return aggregate_klines_df(base_df, agg_interval)
 
     def get_klines_df(self) -> pd.DataFrame:
         """返回当前基础K线的DataFrame副本。"""
@@ -48,7 +61,7 @@ class KlineDataStore(KlinePersistenceInterface):
 
     def get_agg_interval_str(self) -> str:
         return self._agg_interval_str
-        
+
     def get_historical_candles_to_display_count(self) -> int:
         return self._historical_candles_to_display_count
 
@@ -66,7 +79,7 @@ class KlineDataStore(KlinePersistenceInterface):
                 base_intervals_per_agg = agg_td.total_seconds() / base_td.total_seconds()
 
             max_base_rows_to_keep = int((self._historical_candles_to_display_count + 20) * base_intervals_per_agg)
-            
+
             if len(self.df) > max_base_rows_to_keep and max_base_rows_to_keep > 0:
                 logging.debug(f"内存管理：将基础K线从{len(self.df)}行修剪至{max_base_rows_to_keep}行。")
                 self.df = self.df.iloc[-max_base_rows_to_keep:]
