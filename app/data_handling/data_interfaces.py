@@ -5,6 +5,8 @@ from abc import ABC, abstractmethod
 import pandas as pd
 from typing import List, Dict, Any
 
+from typing import Union
+
 class KlinePersistenceInterface(ABC):
     """
     K线数据持久化接口。
@@ -12,19 +14,21 @@ class KlinePersistenceInterface(ABC):
     """
 
     @abstractmethod
-    def add_klines(self, klines_list_of_dicts: List[Dict[str, Any]]):
-        """添加K线数据列表到存储中。"""
+    def add(self, data: Union[Dict[str, Any], List[Dict[str, Any]]]):
+        """添加单个K线字典或K线字典列表到存储中。"""
         pass
-
+        
     @abstractmethod
-    def add_single_kline(self, kline_dict: Dict[str, Any]):
-        """添加单个K线到存储中。"""
+    def get_aggregated(self, agg_interval: str) -> pd.DataFrame:
+        """
+        返回按指定间隔聚合的K线数据。
+        """
         pass
 
     @abstractmethod
     def get_klines_df(self) -> pd.DataFrame:
         """
-        返回所有当前基础K线的DataFrame。
+        返回原始基础K线数据。
         """
         pass
 
@@ -42,6 +46,3 @@ class KlinePersistenceInterface(ABC):
     def get_historical_candles_to_display_count(self) -> int:
         """返回要显示的历史聚合蜡烛数量。"""
         pass
-
-    # TODO: 未来可能添加更多特定方法，例如，按时间范围获取数据，
-    # 这对于数据库实现非常相关。

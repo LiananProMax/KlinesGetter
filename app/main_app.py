@@ -37,6 +37,54 @@ def setup_logging():
     config_logging(logging, config.LOG_LEVEL)
     logging.info(f"运行模式：{config.OPERATING_MODE}（{config.BASE_INTERVAL}数据 -> {config.AGG_INTERVAL}聚合）")
 
+def _is_valid_kline(kline_payload):
+    """验证K线数据的有效性"""
+    return (
+        kline_payload and 
+        'x' in kline_payload and 
+        kline_payload['x']  # 仅处理已关闭的K线
+    )
+
+def _process_kline_data(kline_payload):
+    """从K线数据载荷中提取并格式化K线数据"""
+    if not _is_valid_kline(kline_payload): 
+        return None
+        
+    return {
+        'timestamp': pd.to_datetime(kline_payload['t'], unit='ms', utc=True),
+        'open': float(kline_payload['o']), 
+        'high': float(kline_payload['h']),
+        'low': float(kline_payload['l']), 
+        'close': float(kline_payload['c']),
+        'volume': float(kline_payload['v']), 
+        'quote_volume': float(kline_payload['q'])
+    }
+
+def _handle_error(data):
+    """处理WebSocket错误消息"""
+    logging.error(f"WebSocket API错误：{data.get('m', '未提供错误消息')}")
+
+def _update_kline_store(kline_dict, symbol_ws):
+    """更新K线存储并刷新显示"""
+    global kline_persistence
+    
+    kline_persistence.add_single_kline(kline_dict)
+    
+    current_base_df = kline_persistence.get_klines_df()
+    df_aggregated = aggregate_klines_df(current_base_df, kline_persistence.get_agg_interval_str())
+    
+    _refresh_display(df_aggregated, symbol_ws, current_base_df)
+
+def _refresh_display(df_aggregated, symbol_ws, current_base_df):
+    """刷新UI显示"""
+    display_realtime_update(
+        df_aggregated, 
+        symbol_ws, 
+        kline_persistence.get_agg_interval_str(),
+        kline_persistence.get_base_interval_str(),
+        current_base_df
+    )
+
 def websocket_message_handler(_, message_str: str):
     """处理传入的WebSocket K线消息。"""
     global kline_persistence # 访问kline_persistence实例
@@ -49,35 +97,16 @@ def websocket_message_handler(_, message_str: str):
         data = json.loads(message_str)
 
         if 'e' in data and data['e'] == 'kline':
-            kline_payload = data['k']
-            if kline_payload['x']:  # 仅处理已关闭的K线
-                symbol_ws = kline_payload['s']
-                base_interval_stream = kline_payload['i'] # 匹配kline_persistence.get_base_interval_str()
-                
-                kline_timestamp_dt = pd.to_datetime(kline_payload['t'], unit='ms', utc=True)
-                logging.debug(f"收到{symbol_ws}的已关闭{base_interval_stream}K线 @ {kline_timestamp_dt}")
-                
-                new_kline_dict = {
-                    'timestamp': kline_timestamp_dt,
-                    'open': float(kline_payload['o']), 'high': float(kline_payload['h']),
-                    'low': float(kline_payload['l']), 'close': float(kline_payload['c']),
-                    'volume': float(kline_payload['v']), 'quote_volume': float(kline_payload['q'])
-                }
-                
-                kline_persistence.add_single_kline(new_kline_dict)
-                
-                current_base_df = kline_persistence.get_klines_df()
-                df_aggregated = aggregate_klines_df(current_base_df, kline_persistence.get_agg_interval_str())
-                display_realtime_update(
-                    df_aggregated, 
-                    symbol_ws, 
-                    kline_persistence.get_agg_interval_str(),
-                    kline_persistence.get_base_interval_str(),
-                    current_base_df
-                )
-
+            kline_dict = _process_kline_data(data['k'])
+            if kline_dict:
+                symbol_ws = data['k']['s']
+                base_interval_stream = data['k']['i']
+                logging.debug(f"收到{symbol_ws}的已关闭{base_interval_stream}K线 @ {kline_dict['timestamp']}")
+                _update_kline_store(kline_dict, symbol_ws)
         elif 'e' in data and data['e'] == 'error':
-            logging.error(f"WebSocket API错误：{data.get('m', '未提供错误消息')}")
+            _handle_error(data)
+        else:
+            logging.warning(f"未知消息类型: {data}")
 
     except Exception as e:
         logging.error(f"websocket_message_handler中出错：{e}", exc_info=True)

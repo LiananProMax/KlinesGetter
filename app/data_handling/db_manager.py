@@ -40,6 +40,13 @@ class DBManager(KlinePersistenceInterface):
         except psycopg2.Error as e:
             logging.error(f"连接PostgreSQL数据库时出错：{e}")
             raise
+            
+    def _execute_with_connection(self, query, params=None):
+        """封装数据库操作，管理连接生命周期"""
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:  # 使用自动提交的cursor
+                cur.execute(query, params)
+                return cur.fetchall()
 
     def _release_connection(self, conn):
         """关闭数据库连接。"""
@@ -59,21 +66,16 @@ class DBManager(KlinePersistenceInterface):
             quote_volume NUMERIC
         );
         """
-        conn = None
         try:
-            conn = self._get_connection()
-            with conn.cursor() as cur:
-                cur.execute(create_table_query)
-            conn.commit()
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(create_table_query)
+                # 自动提交事务 (with块结束时)
             logging.info(f"表 '{self.table_name}' 已确保存在。")
         except psycopg2.Error as e:
             logging.error(f"初始化数据库表 {self.table_name} 时出错：{e}")
             # 如果表创建失败，应用程序可能无法正常运行。
-            # 考虑是抛出错误还是更优雅地处理它。
-            if conn: conn.rollback()
             raise
-        finally:
-            self._release_connection(conn)
 
     def add_klines(self, klines_list_of_dicts: List[Dict[str, Any]]):
         """将K线字典列表添加到数据库。"""
@@ -103,21 +105,16 @@ class DBManager(KlinePersistenceInterface):
                 kline['volume'], kline['quote_volume']
             ))
 
-        conn = None
         try:
-            conn = self._get_connection()
-            with conn.cursor() as cur:
-                psycopg2.extras.execute_values(cur, insert_query, data_to_insert, page_size=100)
-            conn.commit()
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    psycopg2.extras.execute_values(cur, insert_query, data_to_insert, page_size=100)
+                # 自动提交事务
             logging.debug(f"成功插入/更新 {len(data_to_insert)} 条K线数据到 {self.table_name}。")
         except psycopg2.Error as e:
             logging.error(f"向 {self.table_name} 插入K线数据时出错：{e}")
-            if conn: conn.rollback()
         except Exception as ex: # 捕获其他潜在错误，如数据准备期间的错误
             logging.error(f"add_klines过程中发生意外错误：{ex}")
-            if conn: conn.rollback()
-        finally:
-            self._release_connection(conn)
 
     def add_single_kline(self, kline_dict: Dict[str, Any]):
         """将单个K线字典添加到数据库。"""
@@ -166,13 +163,13 @@ class DBManager(KlinePersistenceInterface):
             ) AS recent_klines
             ORDER BY timestamp ASC;
         """
-        conn = None
+        
         try:
-            conn = self._get_connection()
-            with conn.cursor() as cur:
-                cur.execute(query, (num_base_rows_to_fetch,))
-                rows = cur.fetchall()
-                columns = [desc[0] for desc in cur.description]
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, (num_base_rows_to_fetch,))
+                    rows = cur.fetchall()
+                    columns = [desc[0] for desc in cur.description]
             
             df = pd.DataFrame(rows, columns=columns)
             if not df.empty and 'timestamp' in df.columns:
@@ -180,14 +177,11 @@ class DBManager(KlinePersistenceInterface):
             else: # 即使为空也确保模式匹配
                  df = pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'quote_volume'])
 
-
             logging.debug(f"从 {self.table_name} 获取了 {len(df)} 行用于处理。请求了最多 {num_base_rows_to_fetch} 行。")
             return df
         except psycopg2.Error as e:
             logging.error(f"从 {self.table_name} 获取K线数据时出错：{e}")
             return pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'quote_volume'])
-        finally:
-            self._release_connection(conn)
 
     def get_base_interval_str(self) -> str:
         return self._base_interval_str

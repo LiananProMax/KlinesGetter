@@ -22,17 +22,19 @@ def get_env_variable(var_name, default_value, var_type=str):
     """
     value = os.getenv(var_name)
     if value is None:
-        # logging.debug(f"环境变量 {var_name} 未找到。使用默认值：{default_value}")
+        logging.debug(f"环境变量 {var_name} 未找到。使用默认值：{default_value}", exc_info=True)
         return default_value
-    
+  
+    if var_type == bool:
+        value = value.lower()
+        if value in {'true', '1', 't', 'yes', 'y'}:
+            return True
+        elif value in {'false', '0', 'f', 'no', 'n'}:
+            return False
+        else:
+            raise ValueError(f"环境变量 {var_name} 必须为布尔可解析值（{value} 无效）")
+  
     try:
-        if var_type == bool: # 布尔值的特殊处理
-            if value.lower() in ('true', '1', 't', 'yes', 'y'):
-                return True
-            elif value.lower() in ('false', '0', 'f', 'no', 'n'):
-                return False
-            else:
-                raise ValueError(f"{var_name} 的布尔值无效：{value}")
         return var_type(value)
     except ValueError:
         # 如果日志尚未配置，使用基本的print

@@ -15,14 +15,17 @@ def format_kline_from_api(kline_data):
         'quote_volume': float(kline_data[7]),
     }
 
+BINANCE_TO_PANDAS = {
+    'm': 'min',
+    'h': 'H',
+    'd': 'D',
+    'w': 'W'
+}
+
 def get_pandas_resample_interval(binance_interval_str):
     """将币安间隔字符串转换为Pandas重采样兼容字符串。"""
-    if binance_interval_str.endswith('m'): # 例如，1m, 3m, 5m
-        return binance_interval_str[:-1] + 'min'
-    elif binance_interval_str.endswith('h'): # 例如，1h, 3h, 4h
-        return binance_interval_str[:-1] + 'H'
-    elif binance_interval_str.endswith('d'): # 例如，1d
-        return binance_interval_str[:-1] + 'D'
-    elif binance_interval_str.endswith('w'): # 例如，1w
-        return binance_interval_str[:-1] + 'W'
-    return binance_interval_str
+    suffix = binance_interval_str[-1]
+    mapping = BINANCE_TO_PANDAS.get(suffix)
+    if not mapping:
+        raise ValueError(f"不支持Binance间隔后缀: {suffix}")
+    return binance_interval_str[:-1] + mapping
