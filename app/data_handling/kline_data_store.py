@@ -13,15 +13,41 @@ class KlineDataStore(KlinePersistenceInterface):
         self._base_interval_str = base_interval_str
         self._agg_interval_str = agg_interval_str
         self._historical_candles_to_display_count = historical_candles_to_display_count
+        # self.df_aggregated = pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'quote_volume']) # 可选：如果要在内存中也存储聚合数据
         log = structlog.get_logger()
         log.debug(f"KlineDataStore初始化完成，用于{base_interval_str} -> {agg_interval_str}。")
 
     def add(self, data: Union[Dict[str, Any], List[Dict[str, Any]]]):
-        """实现抽象方法：添加单个K线字典或K线字典列表到存储中。"""
+        """实现抽象方法：添加单个K线字典或K线字典列表到基础K线存储中。"""
         if isinstance(data, list):
             self.add_klines(data)
         else:
             self.add_single_kline(data)
+
+    def store_aggregated_data(self, aggregated_klines_list: List[Dict[str, Any]]):
+        """
+        实现抽象方法：将聚合后的K线字典列表存储。
+        对于内存存储，聚合通常是动态计算的，所以这里可以pass或者实现特定的内存存储逻辑。
+        """
+        log = structlog.get_logger()
+        log.debug("KlineDataStore: store_aggregated_data called", count=len(aggregated_klines_list), note="In-memory store typically aggregates on-the-fly.")
+        # 如果希望在内存中也保存一份聚合数据副本：
+        # if not aggregated_klines_list:
+        #     return
+        # new_agg_df = pd.DataFrame(aggregated_klines_list)
+        # new_agg_df['timestamp'] = pd.to_datetime(new_agg_df['timestamp'], utc=True)
+        # for col in ['open', 'high', 'low', 'close', 'volume', 'quote_volume']:
+        #     if col in new_agg_df.columns:
+        #         new_agg_df[col] = pd.to_numeric(new_agg_df[col])
+        #
+        # if self.df_aggregated.empty:
+        #     self.df_aggregated = new_agg_df
+        # else:
+        #     self.df_aggregated = pd.concat([self.df_aggregated, new_agg_df], ignore_index=True)
+        # self.df_aggregated = self.df_aggregated.drop_duplicates(subset=['timestamp'], keep='last')
+        # self.df_aggregated = self.df_aggregated.sort_values(by='timestamp').reset_index(drop=True)
+        pass
+
 
     def add_klines(self, klines_list_of_dicts: List[Dict[str, Any]]):
         """向存储中添加新的K线字典列表。"""

@@ -15,9 +15,14 @@ class KlinePersistenceInterface(ABC):
 
     @abstractmethod
     def add(self, data: Union[Dict[str, Any], List[Dict[str, Any]]]):
-        """添加单个K线字典或K线字典列表到存储中。"""
+        """添加单个K线字典或K线字典列表到基础K线存储中。"""
         pass
         
+    @abstractmethod
+    def store_aggregated_data(self, aggregated_klines_list: List[Dict[str, Any]]):
+        """将聚合后的K线字典列表存储到聚合K线存储中。"""
+        pass
+
     @abstractmethod
     def get_aggregated(self, agg_interval: str) -> pd.DataFrame:
         """
