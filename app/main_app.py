@@ -28,6 +28,16 @@ import ssl
 import certifi
 import requests
 
+# 自定义处理器：将日志级别转为大写
+def uppercase_level_processor(_, __, event_dict):
+    """
+    将 event_dict 中的 'level' 键的值转换为大写。
+    """
+    level = event_dict.get("level")
+    if level and isinstance(level, str):  # 检查 level 是否存在且为字符串
+        event_dict["level"] = level.upper()
+    return event_dict
+
 from app.core.config import config
 from app.utils.kline_utils import format_kline_from_api
 
@@ -60,6 +70,7 @@ def setup_logging():
         merge_contextvars,                # 合并上下文变量
         structlog.stdlib.add_logger_name,   # 添加 logger 名称 (例如: "BinanceKlineApp")
         add_stdlib_log_level,             # 添加日志级别 (例如: "info", "error")
+        uppercase_level_processor,        # 将日志级别转为大写 (例如: "INFO", "ERROR")
         TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=True), # 添加时间戳
         StackInfoRenderer(),              # 渲染堆栈信息 (主要用于异常)
         format_exc_info,                  # 格式化异常信息
@@ -82,6 +93,7 @@ def setup_logging():
     foreign_processors_chain = [
         structlog.stdlib.add_logger_name, # 从 record.name 添加 logger
         add_stdlib_log_level,             # 从 record.levelname 添加 level
+        uppercase_level_processor,        # 将日志级别转为大写 (例如: "INFO", "ERROR")
         structlog.stdlib.ExtraAdder(),    # 添加 record.extra 中的额外字段
         # TimeStamper is not typically needed here as LogRecord has `created`
         # StackInfoRenderer and format_exc_info are also usually for structlog events,
