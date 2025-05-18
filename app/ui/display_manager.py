@@ -12,7 +12,7 @@ def display_historical_aggregated_klines(df_aggregated: pd.DataFrame, symbol: st
         return
 
     actual_display_count = min(display_count, len(df_aggregated))
-    log.debug(f"\n--- 初始{actual_display_count}个历史{agg_interval} OHLCV数据（{symbol}）---")
+    log.info(f"\n--- 初始{actual_display_count}个历史{agg_interval} OHLCV数据（{symbol}）---")
 
     output_lines = []
     # 确保timestamp列在潜在的reset_index聚合后存在
@@ -21,25 +21,35 @@ def display_historical_aggregated_klines(df_aggregated: pd.DataFrame, symbol: st
         return
 
     for _, row in df_aggregated.tail(actual_display_count).iterrows():
-        line = (
-            f"  开始：{row['timestamp'].strftime('%Y-%m-%d %H:%M:%S %Z')}, "
-            f"开：{row['open']:.2f}, 高：{row['high']:.2f}, 低：{row['low']:.2f}, 收：{row['close']:.2f}, "
-            f"量：{row['volume']:.2f}, 交易额：{row['quote_volume']:.2f}, 状态：已关闭"
+        log.info(
+            "历史K线数据",
+            symbol=symbol,
+            timestamp=row['timestamp'].isoformat(),
+            open=row['open'],
+            high=row['high'],
+            low=row['low'],
+            close=row['close'],
+            volume=row['volume'],
+            quote_volume=row['quote_volume'],
+            status="已关闭"
         )
-        output_lines.append(line)
-    print("\n".join(output_lines))
-    print("-" * 70)
+    log.info("历史K线数据分隔线", symbol=symbol, agg_interval=agg_interval)
     if len(df_aggregated) < display_count:
         log.debug(f"注意：聚合历史K线（{len(df_aggregated)}）少于期望的数量（{display_count}）。")
 
 
 def _format_kline_row(row, status):
     """格式化K线数据行以统一显示格式"""
-    return (
-        f"  开始：{row['timestamp'].strftime('%Y-%m-%d %H:%M:%S %Z')}, "
-        f"开：{row['open']:.2f}, 高：{row['high']:.2f}, 低：{row['low']:.2f}, 收：{row['close']:.2f}, "
-        f"量：{row['volume']:.2f}, 交易额：{row['quote_volume']:.2f}, 状态：{status}"
-    )
+    return {
+        "timestamp": row['timestamp'].isoformat(),
+        "open": row['open'],
+        "high": row['high'],
+        "low": row['low'],
+        "close": row['close'],
+        "volume": row['volume'],
+        "quote_volume": row['quote_volume'],
+        "status": status
+    }
 
 def _determine_kline_status(row_index, df_len, agg_start_time, agg_end_time, latest_base_time=None, base_duration=None):
     """确定K线状态（正在形成或已关闭）"""
@@ -72,9 +82,19 @@ def display_historical_aggregated_klines(df_aggregated: pd.DataFrame, symbol: st
         return
 
     for _, row in df_aggregated.tail(actual_display_count).iterrows():
-        output_lines.append(_format_kline_row(row, "已关闭"))
-    print("\n".join(output_lines))
-    print("-" * 70)
+        log.info(
+            "历史K线数据",
+            symbol=symbol,
+            timestamp=row['timestamp'].isoformat(),
+            open=row['open'],
+            high=row['high'],
+            low=row['low'],
+            close=row['close'],
+            volume=row['volume'],
+            quote_volume=row['quote_volume'],
+            status="已关闭"
+        )
+    log.info("历史K线数据分隔线", symbol=symbol, agg_interval=agg_interval)
     if len(df_aggregated) < display_count:
         log.debug(f"注意：聚合历史K线（{len(df_aggregated)}）少于期望的数量（{display_count}）。")
 
@@ -117,7 +137,16 @@ def display_realtime_update(df_aggregated: pd.DataFrame, symbol_ws: str, agg_int
             latest_base_time, base_interval_duration
         )
 
-        output_lines.append(_format_kline_row(row_agg, status))
-
-    print("\n".join(output_lines))
-    print("-" * 70)
+        log.info(
+            "实时K线数据",
+            symbol=symbol_ws,
+            timestamp=row_agg['timestamp'].isoformat(),
+            open=row_agg['open'],
+            high=row_agg['high'],
+            low=row_agg['low'],
+            close=row_agg['close'],
+            volume=row_agg['volume'],
+            quote_volume=row_agg['quote_volume'],
+            status=status
+        )
+    log.info("实时K线数据分隔线", symbol=symbol_ws, agg_interval=agg_interval_str)

@@ -148,7 +148,7 @@ def websocket_message_handler(_, message_str: str):
     log = structlog.get_logger()
 
     if not kline_persistence:
-        log.error("Kline持久化服务未初始化", handler="websocket_message_handler")
+        log.error("K线持久化服务未初始化", handler="websocket_message_handler")
         return
 
     try:
@@ -156,7 +156,7 @@ def websocket_message_handler(_, message_str: str):
 
         # 处理订阅确认消息（Binance WebSocket 响应）
         if 'result' in data and 'id' in data:
-            log.debug("订阅确认消息", data=data)  # 使用调试级别记录，减少日志噪声
+            log.debug("收到订阅确认", subscription_id=data['id'])
             return  # 不再处理此消息
 
         # 处理 K 线消息
@@ -165,10 +165,12 @@ def websocket_message_handler(_, message_str: str):
             if kline_dict:
                 symbol_ws = data['k']['s']
                 base_interval_stream = data['k']['i']
-                log.debug("收到已关闭K线", 
-                          symbol=symbol_ws, 
-                          interval=base_interval_stream, 
-                          timestamp=str(kline_dict['timestamp']))
+                log.info(
+                    "收到已关闭K线",
+                    symbol=symbol_ws,
+                    interval=base_interval_stream,
+                    timestamp=kline_dict['timestamp'].isoformat()
+                )
                 _update_kline_store(kline_dict, symbol_ws)
         # 处理错误消息
         elif 'e' in data and data['e'] == 'error':
