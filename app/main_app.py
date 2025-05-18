@@ -56,6 +56,40 @@ ws_manager: BinanceWebsocketManager = None
 log = structlog.get_logger("BinanceKlineApp")
 
 
+def _ensure_record_types_for_db(records_list: list, context_msg: str) -> list:
+    """确保记录列表中的时间戳是datetime对象，数值是float，供数据库使用。"""
+    valid_records = []
+    if not records_list:
+        return []
+        
+    for record in records_list:
+        # 检查并转换 timestamp
+        ts_val = record.get('timestamp')
+        if isinstance(ts_val, pd.Timestamp):
+            record['timestamp'] = ts_val.to_pydatetime()
+        elif not isinstance(ts_val, datetime):
+            log.error(f"{context_msg}: 聚合记录中的时间戳类型不正确，将跳过此记录",
+                      timestamp_val=ts_val, type_val=type(ts_val), record_data=str(record)[:200])
+            continue
+        
+        # 检查并转换数值字段
+        valid_record = True
+        for key in ['open', 'high', 'low', 'close', 'volume', 'quote_volume']:
+            if key in record and record[key] is not None:
+                try:
+                    record[key] = float(record[key])
+                except (ValueError, TypeError) as e_float:
+                    log.error(f"{context_msg}: 聚合记录中字段 '{key}' 转换为float失败，将跳过此记录",
+                              value=record[key], error=str(e_float), record_data=str(record)[:200])
+                    valid_record = False
+                    break # 当前记录无效
+        
+        if valid_record:
+            valid_records.append(record)
+            
+    return valid_records
+
+
 def setup_logging():
     """配置应用程序范围的结构化日志系统。"""
     global log
@@ -155,47 +189,32 @@ def _update_kline_store(kline_dict, symbol_ws):
         log.error("K线持久化服务未初始化，无法更新", for_symbol=symbol_ws)
         return
 
-    # 1. 添加基础K线到存储
     kline_persistence.add_single_kline(kline_dict)
     log.debug("基础K线已添加到持久化存储", timestamp=kline_dict['timestamp'].isoformat())
 
-    # 2. 从持久化存储获取当前所有的基础K线 (可能已经包含了内存管理后的数据)
     current_base_df = kline_persistence.get_klines_df()
     if current_base_df.empty:
         log.warning("从持久化存储获取的基础K线数据为空，无法进行聚合", for_symbol=symbol_ws)
-        _refresh_display(pd.DataFrame(), symbol_ws, current_base_df) # 传递空的聚合DF
+        _refresh_display(pd.DataFrame(), symbol_ws, current_base_df)
         return
 
-    # 3. 聚合这些基础K线
     df_aggregated = aggregate_klines_df(current_base_df, kline_persistence.get_agg_interval_str())
     log.debug("基础K线已聚合", agg_count=len(df_aggregated), base_count_used=len(current_base_df))
 
-
-    # 4. 如果是数据库存储，则将聚合后的数据也存入数据库
     if not df_aggregated.empty and isinstance(kline_persistence, DBManager):
-        # 将整个聚合后的DataFrame（通常由aggregate_klines_df基于可用基础数据完整生成）
-        # 转换为字典列表进行存储。DBManager中的ON CONFLICT将处理插入或更新。
-        aggregated_data_to_store = df_aggregated.to_dict('records')
-        
-        # 确保timestamp是Python datetime对象
-        for record in aggregated_data_to_store:
-            if isinstance(record['timestamp'], pd.Timestamp):
-                record['timestamp'] = record['timestamp'].to_pydatetime()
-            elif not isinstance(record['timestamp'], datetime): # 如果不是datetime也不是Timestamp
-                log.error("聚合记录中的时间戳类型不正确", timestamp_val=record['timestamp'], type_val=type(record['timestamp']))
-                # 选择跳过此记录或尝试转换，这里简单跳过并记录错误
-                continue
+        aggregated_data_to_store_raw = df_aggregated.to_dict('records')
+        # 使用辅助函数确保类型正确
+        aggregated_data_to_store_final = _ensure_record_types_for_db(aggregated_data_to_store_raw, "实时聚合")
 
-
-        if aggregated_data_to_store:
-            log.info("准备存储聚合K线到数据库", count=len(aggregated_data_to_store), symbol=symbol_ws)
+        if aggregated_data_to_store_final:
+            log.info("准备存储实时聚合K线到数据库", count=len(aggregated_data_to_store_final), symbol=symbol_ws)
             try:
-                kline_persistence.store_aggregated_data(aggregated_data_to_store)
-                log.debug("聚合K线数据已提交到DBManager进行存储")
+                kline_persistence.store_aggregated_data(aggregated_data_to_store_final)
+                log.debug("实时聚合K线数据已提交到DBManager进行存储")
             except Exception as e_store_agg:
-                log.error("存储聚合K线到数据库时出错", error=str(e_store_agg), exc_info=True)
+                log.error("存储实时聚合K线到数据库时出错", error=str(e_store_agg), exc_info=True)
         else:
-            log.debug("没有聚合数据需要存储到数据库（可能转换后为空）", symbol=symbol_ws)
+            log.debug("没有有效的实时聚合数据需要存储到数据库", symbol=symbol_ws, raw_count=len(aggregated_data_to_store_raw))
 
 
     # 5. 刷新显示
@@ -365,15 +384,19 @@ def main_application():
 
             # 如果是数据库存储，将初始聚合数据存入数据库
             if not initial_agg_df.empty and isinstance(kline_persistence, DBManager):
-                log.info("存储初始聚合K线到数据库", count=len(initial_agg_df))
-                aggregated_data_to_store = initial_agg_df.to_dict('records')
-                for record in aggregated_data_to_store: # 确保时间戳格式
-                    if isinstance(record['timestamp'], pd.Timestamp):
-                        record['timestamp'] = record['timestamp'].to_pydatetime()
-                try:
-                    kline_persistence.store_aggregated_data(aggregated_data_to_store)
-                except Exception as e_store_hist_agg:
-                     log.error("存储历史聚合K线到数据库时出错", error=str(e_store_hist_agg), exc_info=True)
+                log.info("准备存储初始聚合K线到数据库", count=len(initial_agg_df))
+                initial_agg_data_to_store_raw = initial_agg_df.to_dict('records')
+                # 使用辅助函数确保类型正确
+                initial_agg_data_to_store_final = _ensure_record_types_for_db(initial_agg_data_to_store_raw, "初始聚合")
+                
+                if initial_agg_data_to_store_final:
+                    try:
+                        kline_persistence.store_aggregated_data(initial_agg_data_to_store_final)
+                        log.debug("初始聚合K线数据已存储到数据库")
+                    except Exception as e_store_hist_agg:
+                        log.error("存储历史聚合K线到数据库时出错", error=str(e_store_hist_agg), exc_info=True)
+                else:
+                    log.warning("没有有效的初始聚合数据可存储到数据库。", raw_count=len(initial_agg_data_to_store_raw))
 
 
             display_historical_aggregated_klines(
