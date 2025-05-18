@@ -33,7 +33,7 @@ class DBManager(KlinePersistenceInterface):
         }
         self._initialize_db()
         log = structlog.get_logger()
-        log.info("数据库管理器已初始化", table_name=self.table_name)
+        log.debug("数据库管理器已初始化", table_name=self.table_name)
 
     def _get_connection(self):
         """建立新的数据库连接，并设置会话时区为UTC。"""
@@ -62,7 +62,7 @@ class DBManager(KlinePersistenceInterface):
     def _initialize_db(self):
         """确保K线表存在，并检查timestamp列是否为TIMESTAMPTZ。如果不是，删除并重建表。"""
         log = structlog.get_logger()
-      
+
         # 检查表是否存在，并验证timestamp列的类型
         check_query = """
         SELECT EXISTS (
@@ -78,13 +78,13 @@ class DBManager(KlinePersistenceInterface):
                 with conn.cursor() as cur:
                     cur.execute(check_query, (self.table_name,))
                     result = cur.fetchone()[0]  # 返回布尔值：True如果列存在且类型正确，False否则
-                  
+
                     if not result:
                         # timestamp列类型不正确或表不存在，删除表（如果存在）
                         drop_query = sql.SQL("DROP TABLE IF EXISTS {}").format(sql.Identifier(self.table_name))
                         cur.execute(drop_query)
                         log.warning(f"删除了表 '{self.table_name}' 因为 timestamp 列类型不正确或表不存在。之前的数据已删除。")
-                  
+
                     # 创建或确保表存在，使用TIMESTAMPTZ
                     create_table_query = sql.SQL("""
                     CREATE TABLE IF NOT EXISTS {} (
@@ -98,7 +98,7 @@ class DBManager(KlinePersistenceInterface):
                     );
                     """).format(sql.Identifier(self.table_name))
                     cur.execute(create_table_query)
-                    log.info(f"确保了表 '{self.table_name}' 的存在，timestamp 列为 TIMESTAMPTZ（UTC存储）。")
+                    log.debug(f"确保了表 '{self.table_name}' 的存在，timestamp 列为 TIMESTAMPTZ（UTC存储）。")
         except psycopg2.Error as e:
             log.error("初始化数据库表时出错", table_name=self.table_name, error=str(e))
             raise
@@ -234,4 +234,4 @@ class DBManager(KlinePersistenceInterface):
     def close(self):
         """如果需要显式资源清理的占位符，尽管连接是按方法管理的。"""
         log = structlog.get_logger()
-        log.info("数据库管理器正在关闭", table_name=self.table_name, note="连接按操作管理")
+        log.debug("数据库管理器正在关闭", table_name=self.table_name, note="连接按操作管理")

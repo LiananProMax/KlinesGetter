@@ -64,7 +64,7 @@ def setup_logging():
     logging.basicConfig(level=getattr(logging, log_level))  # 设置标准日志级别（为了兼容性）
 
     # 记录配置加载日志
-    log.info("日志配置完成", log_level=log_level)
+    log.debug("日志配置完成", log_level=log_level)
     log.info(f"运行模式", operating_mode=config.OPERATING_MODE, base_interval=config.BASE_INTERVAL, agg_interval=config.AGG_INTERVAL)
 
 def _is_valid_kline(kline_payload):
@@ -193,7 +193,7 @@ def main_application():
         log.error("初始化数据持久化服务失败", error=str(e_store_init), exc_info=True)
         return # 没有数据存储就无法继续
 
-    log.info("数据存储初始化完成", storage_class=type(kline_persistence).__name__)
+    log.debug("数据存储初始化完成", storage_class=type(kline_persistence).__name__)
 
 
     # 1. 获取历史数据
@@ -218,7 +218,7 @@ def main_application():
 
     # 添加缓冲区（例如，再增加5个聚合间隔）以进行计算并确保有足够的数据
     num_base_klines_needed = int((config.HISTORICAL_AGG_CANDLES_TO_DISPLAY + 5) * base_intervals_per_agg)
-    log.info("计算历史K线需求", 
+    log.debug("计算历史K线需求", 
              klines_needed=num_base_klines_needed, 
              interval=config.BASE_INTERVAL)
 
@@ -233,13 +233,13 @@ def main_application():
 
     if historical_klines_list:
         kline_persistence.add_klines(historical_klines_list)
-        log.info("历史基础K线处理完成", count=len(historical_klines_list))
+        log.debug("历史基础K线处理完成", count=len(historical_klines_list))
 
         base_df_for_initial_agg = kline_persistence.get_klines_df()
         if not base_df_for_initial_agg.empty:
             min_ts = base_df_for_initial_agg['timestamp'].min().isoformat()
             max_ts = base_df_for_initial_agg['timestamp'].max().isoformat()
-            log.info("历史基础K线范围", min_timestamp=min_ts, max_timestamp=max_ts)
+            log.debug("历史基础K线范围", min_timestamp=min_ts, max_timestamp=max_ts)
 
             initial_agg_df = aggregate_klines_df(base_df_for_initial_agg, config.AGG_INTERVAL)
             display_historical_aggregated_klines(

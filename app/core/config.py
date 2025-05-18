@@ -57,6 +57,10 @@ class Config(BaseSettings):
 # 全局配置实例
 config = Config()
 
+# 导入structlog并添加配置加载日志
+import structlog
+log = structlog.get_logger()
+
 # 在应用启动时，验证配置
 try:
     # 验证 OPERATING_MODE
@@ -75,5 +79,5 @@ try:
 except ValueError as e:
     raise RuntimeError(f"配置验证失败：{e}") from e
 
-# 示例：打印配置（在 main_app.py 中使用日志记录）
-# print(f"配置加载成功: {config.model_dump_json(indent=2)}")
+# 添加配置加载成功的DEBUG日志
+log.debug("配置加载成功", config=config.model_dump_json(indent=2))
