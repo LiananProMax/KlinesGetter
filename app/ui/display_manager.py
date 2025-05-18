@@ -12,7 +12,7 @@ def display_historical_aggregated_klines(df_aggregated: pd.DataFrame, symbol: st
         return
 
     actual_display_count = min(display_count, len(df_aggregated))
-    log.info(f"\n--- 初始{actual_display_count}个历史{agg_interval} OHLCV数据（{symbol}）---")
+    log.info("显示历史K线", count=actual_display_count, interval=agg_interval, symbol=symbol)
 
     output_lines = []
     # 确保timestamp列在潜在的reset_index聚合后存在
@@ -64,39 +64,6 @@ def _determine_kline_status(row_index, df_len, agg_start_time, agg_end_time, lat
             return "已关闭"
 
     return "正在形成"
-
-def display_historical_aggregated_klines(df_aggregated: pd.DataFrame, symbol: str, agg_interval: str, display_count: int):
-    """显示初始历史聚合K线集。"""
-    log = structlog.get_logger()
-    if df_aggregated.empty:
-        log.warning(f"没有{agg_interval}的历史数据可显示（{symbol}）。")
-        return
-
-    actual_display_count = min(display_count, len(df_aggregated))
-    log.info(f"\n--- 初始{actual_display_count}个历史{agg_interval} OHLCV数据（{symbol}）---")
-
-    output_lines = []
-    # 确保timestamp列在潜在的reset_index聚合后存在
-    if 'timestamp' not in df_aggregated.columns:
-        log.error("display_historical_aggregated_klines: 聚合DataFrame中缺少'timestamp'列。")
-        return
-
-    for _, row in df_aggregated.tail(actual_display_count).iterrows():
-        log.info(
-            "历史K线数据",
-            symbol=symbol,
-            timestamp=row['timestamp'].isoformat(),
-            open=row['open'],
-            high=row['high'],
-            low=row['low'],
-            close=row['close'],
-            volume=row['volume'],
-            quote_volume=row['quote_volume'],
-            status="已关闭"
-        )
-    log.info("历史K线数据分隔线", symbol=symbol, agg_interval=agg_interval)
-    if len(df_aggregated) < display_count:
-        log.debug(f"注意：聚合历史K线（{len(df_aggregated)}）少于期望的数量（{display_count}）。")
 
 def display_realtime_update(df_aggregated: pd.DataFrame, symbol_ws: str, agg_interval_str: str, base_interval_str: str, all_base_klines_df: pd.DataFrame):
     """显示实时更新的最新聚合K线。"""

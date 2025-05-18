@@ -26,6 +26,7 @@ class Config(BaseSettings):
 
     # --- 日志配置 ---
     LOG_LEVEL: str = "INFO"  # 可能的值: "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
+    LOG_FORMAT: str = "console"  # 默认固定为 "console"
 
     # --- 数据存储配置 ---
     DATA_STORE_TYPE: str = "memory"  # "memory" 或 "database"

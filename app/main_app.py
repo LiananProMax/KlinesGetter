@@ -54,41 +54,66 @@ ws_manager: BinanceWebsocketManager = None
 
 def setup_logging():
     """配置应用程序范围的结构化日志，包括级别过滤。"""
-    # 获取日志级别字符串并转换为logging模块的整数级别
-    log_level_str = config.validated_log_level.upper()  # 确保大写
+    # 获取日志级别
+    log_level_str = config.validated_log_level.upper()
     try:
         log_level_int = getattr(logging, log_level_str)
     except AttributeError:
-        # 回退到INFO，如果配置的级别无效（尽管Pydantic已验证）
-        # 这里使用标准logging来记录这个错误，因为structlog可能还没完全配置好
-        logging.error(f"配置的LOG_LEVEL '{log_level_str}' 无效，回退到 INFO。", 
-                      extra={"configured_level": config.LOG_LEVEL, "fallback_level": "INFO"})
+        # 回退到INFO，如果配置的级别无效
+        logging.error(f"配置的日志级别 '{log_level_str}' 无效，回退到 INFO。")
         log_level_int = logging.INFO 
 
-    # 配置 structlog
+    # 配置 Structlog，使用简洁的人类可读格式
     structlog.configure(
         processors=[
-            merge_contextvars,                        # 合并上下文变量
-            add_log_level,                            # 添加日志级别
-            structlog.stdlib.filter_by_level,         # 直接使用 filter_by_level 函数
-            TimeStamper(fmt="iso", utc=True),         # 添加时间戳处理器，使用UTC和ISO格式
-            StackInfoRenderer(),                      # 添加栈信息
-            format_exc_info,                          # 格式化异常信息
-            ConsoleRenderer(),                        # 输出易读格式而非JSON
+            merge_contextvars,              # 合并上下文变量
+            add_log_level,                  # 添加日志级别
+            filter_by_level,                # 按级别过滤
+            TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=True),  # 简洁的时间戳格式
+            StackInfoRenderer(),            # 添加栈信息（仅在错误时显示）
+            format_exc_info,                # 格式化异常信息
+            ConsoleRenderer(
+                colors=False,              # 禁用颜色以保持简洁
+                sort_keys=False,           # 不强制排序键值对，按输入顺序显示
+                level_styles={
+                    "critical": "",
+                    "exception": "",
+                    "error": "",
+                    "warn": "",
+                    "warning": "",
+                    "info": "",
+                    "debug": "",
+                    "notset": "",
+                },  # 使用空格式样式避免空格填充
+                pad_event=0                # 移除事件名称的填充
+            ),
         ],
         context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),  # 使用 stdlib 的 LoggerFactory
+        logger_factory=structlog.stdlib.LoggerFactory(),
         wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
     )
 
-    # 设置标准日志级别（为了兼容性）
-    logging.basicConfig(level=log_level_int)
+    # 配置日志文件和控制台输出
+    from logging.handlers import RotatingFileHandler
+    file_handler = RotatingFileHandler(
+        "binance_kline_app.log",
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5
+    )
+    file_handler.setLevel(log_level_int)
+    file_handler.setFormatter(logging.Formatter("%(message)s"))
+    logging.basicConfig(
+        level=log_level_int,
+        handlers=[file_handler, logging.StreamHandler()]
+    )
 
-    # 获取 structlog 日志器，并绑定一些全局上下文（如应用名称）
+    # 调整其他库的日志级别
+    logging.getLogger("websocket").setLevel(logging.DEBUG)
+    logging.getLogger("requests").setLevel(logging.WARNING)
+
+    # 获取日志器并绑定全局上下文
     log = structlog.get_logger().bind(service="BinanceKlineApp")
-
-    # 记录日志配置和运行模式
     log.info("日志配置完成", effective_log_level=log_level_str)
     log.info("运行模式", operating_mode=config.OPERATING_MODE,
              base_interval=config.BASE_INTERVAL, agg_interval=config.AGG_INTERVAL)
@@ -313,7 +338,8 @@ def main_application():
             ws_manager.stop()
         if hasattr(kline_persistence, 'close') and callable(getattr(kline_persistence, 'close')):
             kline_persistence.close() # 如果DBManager有close方法，显式关闭它
-        log.info("应用程序已终止")
+        log.info("应用程序终止")
+        clear_contextvars()  # 清理structlog上下文变量，防止内存泄漏
         clear_contextvars()
 
 # if __name__ == "__main__": # 移除此部分，因为run.py是入口点
