@@ -61,31 +61,40 @@ def setup_logging():
     except AttributeError:
         # 回退到INFO，如果配置的级别无效
         logging.error(f"配置的日志级别 '{log_level_str}' 无效，回退到 INFO。")
-        log_level_int = logging.INFO 
+        log_level_int = logging.INFO
 
-    # 配置 Structlog，使用简洁的人类可读格式
+    # 自定义日志格式化器，移除多余空格和格式化问题
+    class SimpleLogFormatter:
+        """简洁的日志格式化器，生成并格式化日志及其属性"""
+        def __call__(self, logger, method_name, event_dict):
+            # 获取级别并格式化
+            if 'level' in event_dict:
+                level = event_dict['level'].upper()
+                event_dict['level'] = f"[{level}]"
+            return event_dict
+
+    # 配置标准库日志格式
+    logging.basicConfig(
+        level=log_level_int,
+        format="%(message)s",  # 只输出消息部分，避免重复前缀
+        force=True  # 强制重置现有配置
+    )
+    
+    # 使用简单的日志处理流程
     structlog.configure(
         processors=[
             merge_contextvars,              # 合并上下文变量
-            add_log_level,                  # 添加日志级别
-            filter_by_level,                # 按级别过滤
+            add_log_level,                 # 添加日志级别
+            SimpleLogFormatter(),          # 自定义格式化器
+            filter_by_level,               # 按级别过滤
             TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=True),  # 简洁的时间戳格式
-            StackInfoRenderer(),            # 添加栈信息（仅在错误时显示）
-            format_exc_info,                # 格式化异常信息
+            format_exc_info,               # 格式化异常信息
+            # 简洁的控制台渲染器
             ConsoleRenderer(
-                colors=False,              # 禁用颜色以保持简洁
-                sort_keys=False,           # 不强制排序键值对，按输入顺序显示
-                level_styles={
-                    "critical": "",
-                    "exception": "",
-                    "error": "",
-                    "warn": "",
-                    "warning": "",
-                    "info": "",
-                    "debug": "",
-                    "notset": "",
-                },  # 使用空格式样式避免空格填充
-                pad_event=0                # 移除事件名称的填充
+                colors=False,               # 禁用颜色以保持简洁
+                sort_keys=False,            # 不强制排序键值对
+                repr_native_str=False,      # 不使用repr()处理字符串
+                pad_event=0,                # 不使用填充
             ),
         ],
         context_class=dict,
@@ -94,7 +103,7 @@ def setup_logging():
         cache_logger_on_first_use=True,
     )
 
-    # 配置日志文件和控制台输出
+    # 配置日志文件
     from logging.handlers import RotatingFileHandler
     file_handler = RotatingFileHandler(
         "binance_kline_app.log",
@@ -103,10 +112,21 @@ def setup_logging():
     )
     file_handler.setLevel(log_level_int)
     file_handler.setFormatter(logging.Formatter("%(message)s"))
-    logging.basicConfig(
-        level=log_level_int,
-        handlers=[file_handler, logging.StreamHandler()]
-    )
+    
+    # 配置控制台处理器
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(log_level_int)
+    console_handler.setFormatter(logging.Formatter("%(message)s"))
+    
+    # 获取根日志器并添加处理器
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level_int)
+    # 清除现有处理器
+    for handler in root_logger.handlers[:]: 
+        root_logger.removeHandler(handler)
+    # 添加新的处理器
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
 
     # 调整其他库的日志级别
     logging.getLogger("websocket").setLevel(logging.DEBUG)
