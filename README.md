@@ -176,14 +176,7 @@ python run.py
 
 关于如何连接数据库、查询特定表、理解数据特性以及如何在您自己的程序中使用这些数据的详细说明，请参阅：
 
-**[详细数据库使用文档: ./docs/database\_usage.md](https://www.google.com/search?q=./docs/database_usage.md)**
-
-## `ImprovedMinhPhan.pine` 脚本说明
-
-项目中包含一个名为 `ImprovedMinhPhan.pine` 的文件。这是一个使用 Pine Script 语言编写的交易策略脚本，适用于 TradingView 平台。
-
-  * **用途**: 此脚本提供了一个基于EMA均线交叉、VWAP确认和RSI指标的改进版MinhPhan策略示例，供用户在TradingView图表上进行技术分析和策略回测。
-  * **注意**: 此 `.pine` 文件**不由**本Python应用程序直接执行或使用。它仅作为与K线数据分析相关的参考资料包含在项目中。
+**[详细数据库使用文档](./docs/database_usage.md)**
 
 ## 测试
 
