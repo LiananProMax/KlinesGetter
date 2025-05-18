@@ -1,9 +1,14 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+# 设置时区为UTC，确保所有时间处理一致
+import os
+import time
+os.environ['TZ'] = 'UTC'
+time.tzset()
+
 import logging
 import structlog
-import time
 import json
 import pandas as pd
 from datetime import datetime, timezone

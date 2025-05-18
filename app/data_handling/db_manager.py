@@ -7,6 +7,7 @@ import pandas as pd
 import psycopg2
 from psycopg2 import extras
 from typing import List, Dict, Any, Optional, Union
+from datetime import timezone
 
 from app.core.config import config # 导入数据库连接详情和间隔配置
 from .data_interfaces import KlinePersistenceInterface
@@ -108,15 +109,19 @@ class DBManager(KlinePersistenceInterface):
         """
 
         # 将字典列表转换为元组列表，用于execute_values
-        # 确保'timestamp'是datetime对象，其他是数值类型
+        # 确保'timestamp'是datetime对象，其他是数值类型，并显式设置为UTC
         data_to_insert = []
         for kline in klines_list_of_dicts:
-            dt_object = pd.to_datetime(kline['timestamp'], utc=True)
+            dt_object = pd.to_datetime(kline['timestamp'], utc=True).tz_convert('UTC')  # 显式转换为UTC
             data_to_insert.append((
-                dt_object,
-                kline['open'], kline['high'], kline['low'], kline['close'],
-                kline['volume'], kline['quote_volume']
+                dt_object,  # UTC-aware datetime
+                float(kline['open']), float(kline['high']), float(kline['low']), float(kline['close']),
+                float(kline['volume']), float(kline['quote_volume'])
             ))
+            
+            # 添加调试日志以验证timestamp
+            log = structlog.get_logger()
+            log.debug("准备插入的K线timestamp", timestamp=dt_object.isoformat(), tzinfo=str(dt_object.tzinfo))
 
         try:
             with self._get_connection() as conn:
@@ -177,15 +182,12 @@ class DBManager(KlinePersistenceInterface):
             num_base_rows_to_fetch = 5000
 
 
-        # 此查询获取最新的'num_base_rows_to_fetch'行，按时间戳升序排序
+        # 此查询获取最新的'num_base_rows_to_fetch'行，按时间戳降序排序，并显式指定时区为UTC
         query = f"""
-            SELECT * FROM (
-                SELECT timestamp, open, high, low, close, volume, quote_volume
-                FROM {self.table_name}
-                ORDER BY timestamp DESC
-                LIMIT %s
-            ) AS recent_klines
-            ORDER BY timestamp ASC;
+            SELECT timestamp AT TIME ZONE 'UTC' AS timestamp_utc, open, high, low, close, volume, quote_volume 
+            FROM {self.table_name}
+            ORDER BY timestamp DESC
+            LIMIT %s
         """
 
         try:
@@ -196,10 +198,11 @@ class DBManager(KlinePersistenceInterface):
                     columns = [desc[0] for desc in cur.description]
 
             df = pd.DataFrame(rows, columns=columns)
-            if not df.empty and 'timestamp' in df.columns:
-                df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True) # 确保时区
+            if not df.empty and 'timestamp_utc' in df.columns:  # 使用别名timestamp_utc
+                df['timestamp_utc'] = pd.to_datetime(df['timestamp_utc'], utc=True)  # 确保UTC
+                df.rename(columns={'timestamp_utc': 'timestamp'}, inplace=True)  # 重命名回'timestamp'
             else: # 即使为空也确保模式匹配
-                 df = pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'quote_volume'])
+                df = pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'quote_volume'])
 
             log = structlog.get_logger()
             log.debug("从表获取数据", table_name=self.table_name, rows_count=len(df), requested_max=num_base_rows_to_fetch)
