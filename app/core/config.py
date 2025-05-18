@@ -79,5 +79,5 @@ try:
 except ValueError as e:
     raise RuntimeError(f"配置验证失败：{e}") from e
 
-# 添加配置加载成功的DEBUG日志
-log.debug("配置加载成功", config=config.model_dump_json(indent=2))
+# 添加配置加载成功的INFO日志（确保在LOG_LEVEL=INFO时可见）
+log.info("配置加载成功", config=config.model_dump_json(indent=2))

@@ -5,10 +5,23 @@
 import os
 import time
 os.environ['TZ'] = 'UTC'
-time.tzset()
+try:
+    time.tzset() # This might not work on all systems, especially Windows
+except AttributeError:
+    pass # Ignore if tzset is not available
 
 import logging
 import structlog
+# 导入 Structlog 处理器
+from structlog.stdlib import filter_by_level
+from structlog.processors import (
+    add_log_level,
+    TimeStamper,
+    StackInfoRenderer,
+    format_exc_info,
+)
+from structlog.contextvars import merge_contextvars
+from structlog.dev import ConsoleRenderer
 import json
 import pandas as pd
 from datetime import datetime, timezone
@@ -40,16 +53,31 @@ kline_persistence: KlinePersistenceInterface = None
 ws_manager: BinanceWebsocketManager = None
 
 def setup_logging():
-    """配置应用程序范围的结构化日志。"""
+    """配置应用程序范围的结构化日志，包括级别过滤。"""
+    # 获取日志级别字符串并转换为logging模块的整数级别
+    log_level_str = config.validated_log_level.upper()  # 确保大写
+    try:
+        log_level_int = getattr(logging, log_level_str)
+    except AttributeError:
+        # 回退到INFO，如果配置的级别无效（尽管Pydantic已验证）
+        # 这里使用标准logging来记录这个错误，因为structlog可能还没完全配置好
+        logging.error(f"配置的LOG_LEVEL '{log_level_str}' 无效，回退到 INFO。", 
+                      extra={"configured_level": config.LOG_LEVEL, "fallback_level": "INFO"})
+        log_level_int = logging.INFO 
+
+    # --- 在这里创建过滤器处理器实例 ---
+    level_filter_processor = filter_by_level(log_level_int) 
+
     # 配置 structlog
     structlog.configure(
         processors=[
-            structlog.contextvars.merge_contextvars,  # 合并上下文变量
-            structlog.processors.add_log_level,       # 添加日志级别
-            structlog.processors.TimeStamper(fmt="iso", utc=True),  # 添加时间戳处理器，使用UTC和ISO格式
-            structlog.processors.StackInfoRenderer(), # 添加栈信息
-            structlog.processors.format_exc_info,     # 格式化异常信息
-            structlog.processors.JSONRenderer(),      # 输出 JSON 格式
+            merge_contextvars,                        # 合并上下文变量
+            add_log_level,                            # 添加日志级别
+            level_filter_processor,                   # <-- 使用创建好的实例
+            TimeStamper(fmt="iso", utc=True),         # 添加时间戳处理器，使用UTC和ISO格式
+            StackInfoRenderer(),                      # 添加栈信息
+            format_exc_info,                          # 格式化异常信息
+            ConsoleRenderer(),                        # 输出易读格式而非JSON
         ],
         context_class=dict,
         logger_factory=structlog.PrintLoggerFactory(),  # 输出到控制台
@@ -59,13 +87,12 @@ def setup_logging():
     # 获取 structlog 日志器，并绑定一些全局上下文（如应用名称）
     log = structlog.get_logger().bind(service="BinanceKlineApp")
 
-    # 设置日志级别（从 Pydantic 配置中获取）
-    log_level = config.validated_log_level  # 使用 Pydantic 的验证日志级别
-    logging.basicConfig(level=getattr(logging, log_level))  # 设置标准日志级别（为了兼容性）
+    # 设置标准日志级别（为了兼容性，虽然structlog通常绕过它）
+    logging.basicConfig(level=log_level_int)
 
-    # 记录配置加载日志
-    log.debug("日志配置完成", log_level=log_level)
-    log.info(f"运行模式", operating_mode=config.OPERATING_MODE, base_interval=config.BASE_INTERVAL, agg_interval=config.AGG_INTERVAL)
+    # 记录日志配置和运行模式（使用INFO级别，确保在LOG_LEVEL=INFO时可见）
+    log.info("日志配置完成", effective_log_level=log_level_str)
+    log.info("运行模式", operating_mode=config.OPERATING_MODE, base_interval=config.BASE_INTERVAL, agg_interval=config.AGG_INTERVAL)
 
 def _is_valid_kline(kline_payload):
     """验证K线数据的有效性"""
