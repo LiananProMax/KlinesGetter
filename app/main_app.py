@@ -41,6 +41,7 @@ def setup_logging():
         processors=[
             structlog.contextvars.merge_contextvars,  # 合并上下文变量
             structlog.processors.add_log_level,       # 添加日志级别
+            structlog.processors.TimeStamper(fmt="iso", utc=True),  # 添加时间戳处理器，使用UTC和ISO格式
             structlog.processors.StackInfoRenderer(), # 添加栈信息
             structlog.processors.format_exc_info,     # 格式化异常信息
             structlog.processors.JSONRenderer(),      # 输出 JSON 格式
