@@ -65,34 +65,33 @@ def setup_logging():
                       extra={"configured_level": config.LOG_LEVEL, "fallback_level": "INFO"})
         log_level_int = logging.INFO 
 
-    # --- 在这里创建过滤器处理器实例 ---
-    level_filter_processor = filter_by_level(log_level_int) 
-
     # 配置 structlog
     structlog.configure(
         processors=[
             merge_contextvars,                        # 合并上下文变量
             add_log_level,                            # 添加日志级别
-            level_filter_processor,                   # <-- 使用创建好的实例
+            structlog.stdlib.filter_by_level,         # 直接使用 filter_by_level 函数
             TimeStamper(fmt="iso", utc=True),         # 添加时间戳处理器，使用UTC和ISO格式
             StackInfoRenderer(),                      # 添加栈信息
             format_exc_info,                          # 格式化异常信息
             ConsoleRenderer(),                        # 输出易读格式而非JSON
         ],
         context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),  # 输出到控制台
-        wrapper_class=structlog.BoundLogger,
+        logger_factory=structlog.stdlib.LoggerFactory(),  # 使用 stdlib 的 LoggerFactory
+        wrapper_class=structlog.stdlib.BoundLogger,
+        cache_logger_on_first_use=True,
     )
+
+    # 设置标准日志级别（为了兼容性）
+    logging.basicConfig(level=log_level_int)
 
     # 获取 structlog 日志器，并绑定一些全局上下文（如应用名称）
     log = structlog.get_logger().bind(service="BinanceKlineApp")
 
-    # 设置标准日志级别（为了兼容性，虽然structlog通常绕过它）
-    logging.basicConfig(level=log_level_int)
-
-    # 记录日志配置和运行模式（使用INFO级别，确保在LOG_LEVEL=INFO时可见）
+    # 记录日志配置和运行模式
     log.info("日志配置完成", effective_log_level=log_level_str)
-    log.info("运行模式", operating_mode=config.OPERATING_MODE, base_interval=config.BASE_INTERVAL, agg_interval=config.AGG_INTERVAL)
+    log.info("运行模式", operating_mode=config.OPERATING_MODE,
+             base_interval=config.BASE_INTERVAL, agg_interval=config.AGG_INTERVAL)
 
 def _is_valid_kline(kline_payload):
     """验证K线数据的有效性"""
