@@ -4,6 +4,10 @@
 import logging
 from typing import Any
 from pydantic_settings import BaseSettings, SettingsConfigDict
+import structlog # 导入structlog
+
+# 使用模块级logger
+log = structlog.get_logger(__name__)
 
 class Config(BaseSettings):
     # --- API配置 ---
@@ -20,55 +24,45 @@ class Config(BaseSettings):
     MAX_KLINE_LIMIT_PER_REQUEST: int = 1000  # 每次请求K线的币安API限制
 
     # --- 动态间隔设置（由OPERATING_MODE决定） ---
-    # 注意：Pydantic 无法直接处理逻辑，这里我们保留在 main_app.py 中计算
-    BASE_INTERVAL: str = ""  # 基础间隔，由 OPERATING_MODE 决定
-    AGG_INTERVAL: str = ""   # 聚合间隔，由 OPERATING_MODE 决定
+    BASE_INTERVAL: str = ""
+    AGG_INTERVAL: str = ""
 
     # --- 日志配置 ---
-    LOG_LEVEL: str = "INFO"  # 可能的值: "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
-    LOG_FORMAT: str = "console"  # 默认固定为 "console"
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "console" # 此设置更多是概念性的，structlog有自己的渲染方式
 
     # --- 数据存储配置 ---
-    DATA_STORE_TYPE: str = "memory"  # "memory" 或 "database"
+    DATA_STORE_TYPE: str = "memory"
 
-    # --- PostgreSQL数据库配置 (仅当 DATA_STORE_TYPE="database" 时相关) ---
+    # --- PostgreSQL数据库配置 ---
     DB_HOST: str = "localhost"
     DB_PORT: str = "5432"
     DB_NAME: str = "binance_data"
     DB_USER: str = "postgres"
     DB_PASSWORD: str = ""
 
-    # Pydantic 配置：从 .env 文件加载，并验证
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
-    # 自定义验证：确保 OPERATING_MODE 是有效的
     @property
     def is_valid_operating_mode(self) -> bool:
         return self.OPERATING_MODE.upper() in ["TEST", "PRODUCTION"]
 
-    # 自定义验证：确保 LOG_LEVEL 是有效的
     @property
     def validated_log_level(self) -> str:
         valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
         level = self.LOG_LEVEL.upper()
         if level not in valid_levels:
+            # 注意: 此时日志系统可能还未完全配置，此处的ValueError可能比log.error更早被看到
             raise ValueError(f"无效的 LOG_LEVEL '{level}'。必须是 {valid_levels} 中的一个。")
         return level
 
 # 全局配置实例
-config = Config()
-
-# 导入structlog并添加配置加载日志
-import structlog
-log = structlog.get_logger()
-
-# 在应用启动时，验证配置
 try:
-    # 验证 OPERATING_MODE
+    config = Config()
+
     if not config.is_valid_operating_mode:
         raise ValueError(f"OPERATING_MODE '{config.OPERATING_MODE}' 无效。必须是 'TEST' 或 'PRODUCTION'。")
 
-    # 设置 BASE_INTERVAL 和 AGG_INTERVAL 基于 OPERATING_MODE
     if config.OPERATING_MODE.upper() == "TEST":
         config.BASE_INTERVAL = "1m"
         config.AGG_INTERVAL = "3m"
@@ -76,9 +70,13 @@ try:
         config.BASE_INTERVAL = "1h"
         config.AGG_INTERVAL = "3h"
 
-    # 其他验证可以在这里添加
+    # 在日志系统配置完成后，此日志才会按预期格式输出
+    # 我们将在main_app.py中日志系统配置完成后再打印配置信息
 except ValueError as e:
+    log.critical("配置验证失败，应用程序可能无法启动", error=str(e)) # 使用 logger
     raise RuntimeError(f"配置验证失败：{e}") from e
+except Exception as e_global_config:
+    log.critical("加载配置时发生严重错误", error=str(e_global_config))
+    raise RuntimeError(f"加载配置时发生严重错误：{e_global_config}") from e_global_config
 
-# 添加配置加载成功的INFO日志（确保在LOG_LEVEL=INFO时可见）
-log.info("配置加载成功", config=config.model_dump_json(indent=2))
+# 移除这里的 log.info("配置加载成功"...)，移至 main_app.py 中日志系统初始化之后
