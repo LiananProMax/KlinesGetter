@@ -20,7 +20,7 @@ from structlog.processors import (
     StackInfoRenderer,
     format_exc_info,
 )
-from structlog.contextvars import merge_contextvars
+from structlog.contextvars import merge_contextvars, bind_contextvars, clear_contextvars
 from structlog.dev import ConsoleRenderer
 import json
 import pandas as pd
@@ -186,8 +186,10 @@ def websocket_message_handler(_, message_str: str):
                   original_message=message_str)
 
 def main_application():
-    global kline_persistence, ws_manager 
-
+    global kline_persistence, ws_manager
+    bind_contextvars(symbol=config.SYMBOL, operating_mode=config.OPERATING_MODE)
+    setup_logging()
+    log = structlog.get_logger()
     # 设置全局SSL上下文
     ssl_context = ssl.create_default_context(cafile=certifi.where())
     ssl_context.check_hostname = True  # 启用主机名验证
@@ -196,9 +198,6 @@ def main_application():
     # 创建一个使用certifi证书的requests Session
     requests_session = requests.Session()
     requests_session.verify = certifi.where()
-
-    setup_logging()
-    log = structlog.get_logger().bind(symbol=config.SYMBOL)
 
     # --- 初始化数据持久化服务 ---
     try:
@@ -315,6 +314,7 @@ def main_application():
         if hasattr(kline_persistence, 'close') and callable(getattr(kline_persistence, 'close')):
             kline_persistence.close() # 如果DBManager有close方法，显式关闭它
         log.info("应用程序已终止")
+        clear_contextvars()
 
 # if __name__ == "__main__": # 移除此部分，因为run.py是入口点
 #     main_application()
