@@ -15,8 +15,19 @@ import ssl
 
 log_fetch = structlog.get_logger(__name__) # 使用模块级logger，避免在函数内部反复获取
 
-def fetch_historical_klines(symbol, interval, num_klines_to_fetch, api_base_url, max_limit_per_request, session=None):
-    """从币安期货REST API获取历史K线。"""
+def fetch_historical_klines(symbol, interval, num_klines_to_fetch, api_base_url, max_limit_per_request, session=None, max_retries=3, base_delay=1.0):
+    """从币安期货REST API获取历史K线。
+    
+    Args:
+        symbol: 交易对符号
+        interval: K线间隔
+        num_klines_to_fetch: 要获取的K线数量
+        api_base_url: API基础URL
+        max_limit_per_request: 每次请求的最大限制
+        session: requests会话对象
+        max_retries: 最大重试次数
+        base_delay: 基础重试延迟时间（秒）
+    """
     # log = structlog.get_logger() # 改用模块级 logger: log_fetch
     klines_fetched_so_far = 0
     all_klines_raw_list = []
@@ -34,35 +45,67 @@ def fetch_historical_klines(symbol, interval, num_klines_to_fetch, api_base_url,
         }
         request_end_time_iso = pd.to_datetime(current_end_time_ms, unit='ms', utc=True).isoformat()
         log_fetch.debug(f"获取{symbol}批次：{current_batch_limit}个'{interval}'K线，结束时间：{request_end_time_iso}")
-        try:
-            if session is None:
-                session = requests.Session()
-                session.verify = certifi.where()
-            response = session.get(f"{api_base_url}/fapi/v1/klines", params=params)
-            response.raise_for_status()
-            data_batch_raw = response.json()
-            if not data_batch_raw:
-                log_fetch.debug("此期间内没有更多的历史数据。")
-                break
-
-            first_k_ts = pd.to_datetime(data_batch_raw[0][0], unit='ms', utc=True).isoformat()
-            last_k_ts = pd.to_datetime(data_batch_raw[-1][0], unit='ms', utc=True).isoformat()
-            log_fetch.debug(f"  收到批次：{len(data_batch_raw)}个K线。从{first_k_ts}到{last_k_ts}")
-
-            all_klines_raw_list = data_batch_raw + all_klines_raw_list
-            klines_fetched_so_far += len(data_batch_raw)
-            if len(data_batch_raw) < current_batch_limit:
-                log_fetch.debug(f"  获取了{len(data_batch_raw)}个K线，少于请求的{current_batch_limit}。假设没有更旧的数据。")
-                break
-            current_end_time_ms = data_batch_raw[0][0]
-            time.sleep(0.25) # 保持礼谐的请求间隔
-        except requests.exceptions.RequestException as e:
-            log_fetch.error(f"获取历史K线时出错：{e}")
+        
+        # 实现重试机制
+        retry_count = 0
+        data_batch_raw = None
+        
+        while retry_count <= max_retries:
+            try:
+                if session is None:
+                    session = requests.Session()
+                    session.verify = certifi.where()
+                response = session.get(f"{api_base_url}/fapi/v1/klines", params=params, timeout=30)
+                response.raise_for_status()
+                data_batch_raw = response.json()
+                break  # 成功获取数据，退出重试循环
+                
+            except requests.exceptions.RequestException as e:
+                retry_count += 1
+                if retry_count <= max_retries:
+                    delay = base_delay * (2 ** (retry_count - 1))  # 指数退避
+                    log_fetch.warning(f"获取历史K线时出错（第{retry_count}次重试）：{e}，"
+                                     f"{delay:.1f}秒后重试...")
+                    time.sleep(delay)
+                else:
+                    log_fetch.error(f"获取历史K线失败，已达最大重试次数{max_retries}：{e}")
+                    return []
+                    
+            except json.JSONDecodeError as e:
+                retry_count += 1
+                if retry_count <= max_retries:
+                    delay = base_delay * (2 ** (retry_count - 1))  # 指数退避
+                    log_fetch.warning(f"从历史K线响应解码JSON时出错（第{retry_count}次重试）：{e}，"
+                                     f"{delay:.1f}秒后重试...")
+                    if 'response' in locals(): 
+                        log_fetch.debug(f"响应文本：{response.text[:200]}...")
+                    time.sleep(delay)
+                else:
+                    log_fetch.error(f"JSON解码失败，已达最大重试次数{max_retries}：{e}")
+                    if 'response' in locals(): 
+                        log_fetch.error(f"响应文本：{response.text}")
+                    return []
+        
+        # 检查是否成功获取到数据
+        if data_batch_raw is None:
+            log_fetch.error("重试后仍未能获取到数据")
             return []
-        except json.JSONDecodeError as e:
-            log_fetch.error(f"从历史K线响应解码JSON时出错：{e}")
-            if response: log_fetch.error(f"响应文本：{response.text}")
-            return []
+            
+        if not data_batch_raw:
+            log_fetch.debug("此期间内没有更多的历史数据。")
+            break
+
+        first_k_ts = pd.to_datetime(data_batch_raw[0][0], unit='ms', utc=True).isoformat()
+        last_k_ts = pd.to_datetime(data_batch_raw[-1][0], unit='ms', utc=True).isoformat()
+        log_fetch.debug(f"  收到批次：{len(data_batch_raw)}个K线。从{first_k_ts}到{last_k_ts}")
+
+        all_klines_raw_list = data_batch_raw + all_klines_raw_list
+        klines_fetched_so_far += len(data_batch_raw)
+        if len(data_batch_raw) < current_batch_limit:
+            log_fetch.debug(f"  获取了{len(data_batch_raw)}个K线，少于请求的{current_batch_limit}。假设没有更旧的数据。")
+            break
+        current_end_time_ms = data_batch_raw[0][0]
+        time.sleep(0.25) # 保持礼谐的请求间隔
 
     # formatted_klines = [format_kline_from_api(k) for k in all_klines_raw_list] # 移动到去重逆辑中
     
@@ -89,7 +132,7 @@ def fetch_historical_klines(symbol, interval, num_klines_to_fetch, api_base_url,
         # 按时间戳排序 (升序), 然后对于重复的时间戳，保留最后出现的那个。
         # 币安API通常按时间倒序返回数据，我们是 data_batch_raw + all_klines_raw_list，
         # 所以越新的批次（时间越晚）在 all_klines_raw_list 的越前面。
-        # 如果要保留“最新获取”的（通常意味着数据更可靠或最终），
+        # 如果要保留"最新获取"的（通常意味着数据更可靠或最终），
         # 排序后用 keep='last' (对于相同时间戳，保留排序后的最后一个，即最新的)
         # 或者如果信任原始顺序，先反转列表，再 drop_duplicates(keep='first')
         # 这里我们假设 format_kline_from_api 产生的 'timestamp' 是可比较的

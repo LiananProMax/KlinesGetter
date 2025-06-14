@@ -65,7 +65,8 @@ venv.bak/
 
 # Project specific
 config.ini
-*.log
+logs/*.log
+logs/*.log.*
 .env
 credentials.json
 api_key.txt

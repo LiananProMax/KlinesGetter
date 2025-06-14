@@ -137,8 +137,15 @@ def setup_logging():
     console_handler.setFormatter(console_formatter)
     console_handler.setLevel(log_level_int)
 
+    # 创建logs文件夹（如果不存在）
+    import os
+    logs_dir = "logs"
+    if not os.path.exists(logs_dir):
+        os.makedirs(logs_dir)
+
+    # 修改日志文件路径到logs文件夹
     file_handler = RotatingFileHandler(
-        "binance_kline_app.log",
+        os.path.join(logs_dir, "binance_kline_app.log"),
         maxBytes=10 * 1024 * 1024,
         backupCount=5,
         encoding='utf-8'
