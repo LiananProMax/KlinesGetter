@@ -17,7 +17,7 @@ def format_kline_from_api(kline_data):
 
 BINANCE_TO_PANDAS = {
     'm': 'min',
-    'h': 'H',
+    'h': 'h',
     'd': 'D',
     'w': 'W'
 }

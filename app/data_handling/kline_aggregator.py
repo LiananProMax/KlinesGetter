@@ -25,6 +25,8 @@ def aggregate_klines_df(df_source: pd.DataFrame, agg_interval_str: str) -> pd.Da
     }
     
     pandas_agg_interval = get_pandas_resample_interval(agg_interval_str)
-    df_agg = df_resample_source.resample(pandas_agg_interval, label='left', closed='left').agg(agg_rules)
+    # 添加 origin='start_day' 确保时间桶对齐到每天的开始（00:00:00）
+    # 对于3H间隔，这样会产生00:00, 03:00, 06:00等整点对齐的时间桶
+    df_agg = df_resample_source.resample(pandas_agg_interval, label='left', closed='left', origin='start_day').agg(agg_rules)
     df_agg = df_agg.dropna().reset_index()
     return df_agg
