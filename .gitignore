@@ -62,6 +62,7 @@ venv.bak/
 .vscode/
 *.swp
 *.swo
+.windsurf/
 
 # Project specific
 config.ini
